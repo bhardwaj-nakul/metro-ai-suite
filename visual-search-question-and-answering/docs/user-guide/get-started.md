@@ -46,7 +46,7 @@ VLM OpenVINO Serving is not built from source. The Compose file references the p
 image by its pinned tag, so Compose pulls it automatically. To fetch it ahead of time:
 
 ```bash
-docker pull intel/vlm-openvino-serving:2026.2.0-20260807-weekly
+docker pull intel/vlm-openvino-serving:2026.2.0
 ```
 
 Run the command to build image for the application:

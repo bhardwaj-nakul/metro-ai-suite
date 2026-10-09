@@ -3,7 +3,7 @@
 
 services:
   vlm-openvino-serving:
-    image: intel/vlm-openvino-serving:2026.2.0-20260807-weekly
+    image: intel/vlm-openvino-serving:2026.2.0
     container_name: vlm-openvino-serving
     ports:
       - "${VLM_SERVICE_PORT}:8000"
@@ -72,7 +72,10 @@ services:
       - "${MINIO_CONSOLE_HOST_PORT:-9001}:${MINIO_CONSOLE_PORT:-9001}"
     volumes:
       - milvus-minio-data:/data
-    command: minio server /data --console-address ":9001"
+    command: |
+      server /data
+      --address ":${MINIO_API_PORT:-9000}"
+      --console-address ":${MINIO_CONSOLE_PORT:-9001}"
     healthcheck:
       test:
       - CMD-SHELL
@@ -90,6 +93,10 @@ services:
     environment:
       ETCD_ENDPOINTS: milvus-etcd:2379
       MINIO_ADDRESS: milvus-minio:${MINIO_API_PORT:-9000}
+      # Must match the milvus-minio root credentials, otherwise Milvus cannot
+      # authenticate against its object store and aborts on startup.
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       http_proxy: ""
       https_proxy: ""
       no_proxy: ""
@@ -144,7 +151,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 40
-      start_period: 5s
+      start_period: 30s
     devices:
       - /dev/dri:/dev/dri
     networks:
@@ -225,7 +232,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 40
-      start_period: 5s
+      start_period: 30s
     networks:
       - default
     depends_on:
@@ -260,6 +267,9 @@ services:
       - DEFAULT_TOP_K=${DEFAULT_TOP_K:-20}
       - MAX_TOP_K=${MAX_TOP_K:-1000}
       - LOG_LEVEL=${VECTOR_RETRIEVER_LOG_LEVEL:-INFO}
+      # Upper bound on a single embedding call. Large CLIP variants (e.g.
+      # clip-vit-h-14) need well over the 30s default to encode one image on CPU.
+      - REQUEST_TIMEOUT_SECONDS=${RETRIEVER_REQUEST_TIMEOUT_SECONDS:-120}
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')\""]
@@ -322,8 +332,6 @@ services:
       - ${HOST_DATA_PATH}:/home/user/data:rw
 
 volumes:
-  minio_data:
-    driver: local
   ov-models:
   milvus-etcd-data:
   milvus-minio-data:
