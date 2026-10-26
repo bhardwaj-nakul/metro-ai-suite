@@ -189,6 +189,16 @@ For Milvus, select the backend before starting any camera mode:
 VECTORDB_BACKEND=milvus source setup.sh --start
 ```
 
+Docker reuses a local copy of an image tag such as `latest` even when a newer image is published. Add `--pull-always` (alias `--force-pull`) to any `--start*` option, or set `PULL_ALWAYS=true`, to check the registry for every image before starting (Compose `up --pull always`):
+
+```bash
+source setup.sh --start --pull-always
+# or, with Make
+make deploy PULL_ALWAYS=true
+```
+
+Images that exist only locally, such as those built from source, are kept when the registry has no matching image. A registry image with the same name and tag replaces a locally built one, so use a distinct `TAG` for local builds. The option is ignored for `config`, `--down`, `--clean-data`, and `--setenv`.
+
 ## RTSP Test Stream (Out-of-Box)
 
 Use the bundled sample video to spin up a looped RTSP stream and point Frigate at it.

@@ -28,6 +28,7 @@
 #   MME_EMBEDDING_DEVICE      - Query embedding device (default: CPU)
 #   APP_HOST_PORT             - Main app port (default: 12345)
 #   ENABLE_METRICS_MANAGER    - Live system/DataPrep metrics (default: true)
+#   PULL_ALWAYS               - Pull newer images, e.g. latest, on deploy (default: false)
 #
 # Required Secrets (must be set before deploy):
 #   MINIO_ROOT_USER, MINIO_ROOT_PASSWORD
@@ -147,6 +148,7 @@ define EXPORT_RUNTIME_ENV
 	export MME_EMBEDDING_DEVICE="$${MME_EMBEDDING_DEVICE:-$(MME_EMBEDDING_DEVICE)}"
 	export VECTORDB_BACKEND="$${VECTORDB_BACKEND:-$(VECTORDB_BACKEND)}"
 	export ENABLE_METRICS_MANAGER="$${ENABLE_METRICS_MANAGER:-$(ENABLE_METRICS_MANAGER)}"
+	export PULL_ALWAYS="$${PULL_ALWAYS:-$(PULL_ALWAYS)}"
 	export VS_WATCH_BATCH_SIZE="$${VS_WATCH_BATCH_SIZE:-$(VS_WATCH_BATCH_SIZE)}"
 	export VS_BATCH_JOB_POLL_INTERVAL_SECONDS="$${VS_BATCH_JOB_POLL_INTERVAL_SECONDS:-$(VS_BATCH_JOB_POLL_INTERVAL_SECONDS)}"
 	export VS_BATCH_JOB_TIMEOUT_SECONDS="$${VS_BATCH_JOB_TIMEOUT_SECONDS:-$(VS_BATCH_JOB_TIMEOUT_SECONDS)}"
@@ -303,6 +305,7 @@ deploy: validate
 	@echo "  DATAPREP_EMBEDDING_DEVICE: $(DATAPREP_EMBEDDING_DEVICE)"
 	@echo "  DATAPREP_DETECTION_DEVICE: $(DATAPREP_DETECTION_DEVICE)"
 	@echo "  MME_EMBEDDING_DEVICE: $(MME_EMBEDDING_DEVICE)"
+	@echo "  PULL_ALWAYS:        $(or $(PULL_ALWAYS),false)"
 	@echo ""
 	@echo "Secrets:"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -615,6 +618,7 @@ help:
 	@echo "  VS_BATCH_JOB_TIMEOUT_SECONDS  Batch completion timeout (default: 3600)"
 	@echo "  USB_CAMERA_DEVICE       USB camera path (default: /dev/video0)"
 	@echo "  START_MODE              default | rtsp-test | usb-camera"
+	@echo "  PULL_ALWAYS             true pulls newer images (e.g. latest) on deploy (default: false)"
 	@echo ""
 	@echo "EXAMPLES"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -629,6 +633,9 @@ help:
 	@echo ""
 	@echo "  # Pull a specific version and deploy"
 	@echo "  TAG=<version> make deploy-build"
+	@echo ""
+	@echo "  # Refresh cached images with moving tags (e.g. latest) and deploy"
+	@echo "  make deploy PULL_ALWAYS=true"
 	@echo ""
 	@echo "  # Preview resolved compose config"
 	@echo "  make config"

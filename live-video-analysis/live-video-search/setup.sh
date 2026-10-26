@@ -47,6 +47,34 @@ stop_containers() {
     return 0
 }
 
+# --pull-always (alias --force-pull) or PULL_ALWAYS=true makes a start check the registry
+# for every image, so moving tags such as `latest` are refreshed instead of reusing a
+# cached copy. The flag may appear anywhere and is removed before argument validation.
+# lvs_pull_always is reset on every run, so the flag does not persist in the sourcing shell.
+lvs_pull_always=false
+case "${PULL_ALWAYS:-false}" in
+    true|TRUE|True|1) lvs_pull_always=true ;;
+    false|FALSE|False|0) ;;
+    *)
+        echo -e "${RED}ERROR: PULL_ALWAYS must be true or false (got '${PULL_ALWAYS}').${NC}"
+        return 1
+        ;;
+esac
+lvs_args=()
+for lvs_arg in "$@"; do
+    case "$lvs_arg" in
+        --pull-always|--force-pull) lvs_pull_always=true ;;
+        *) lvs_args+=("$lvs_arg") ;;
+    esac
+done
+set -- "${lvs_args[@]}"
+unset lvs_arg lvs_args
+
+if [ "$lvs_pull_always" = true ] && { [ "$2" = "config" ] || [ "$1" = "--down" ] \
+    || [ "$1" = "--clean-data" ] || [ "$1" = "--setenv" ]; }; then
+    echo -e "${YELLOW}Note: --pull-always / PULL_ALWAYS only applies when starting; ignored for this command.${NC}"
+fi
+
 if [ "$1" = "--start" ]; then
     if [ -n "$2" ]; then
         set -- "--start" "$2"
@@ -69,7 +97,7 @@ fi
 
 if [ "$#" -eq 0 ] || ([ "$#" -eq 1 ] && [ "$1" = "--help" ]); then
     echo -e "-----------------------------------------------------------------"
-    echo -e "${YELLOW}USAGE: ${GREEN}source setup.sh ${BLUE}[--setenv | --down | --clean-data | --help | --start | --start-rtsp-test | --start-usb-camera ${GREEN}[config]${BLUE}]"
+    echo -e "${YELLOW}USAGE: ${GREEN}source setup.sh ${BLUE}[--setenv | --down | --clean-data | --help | --start | --start-rtsp-test | --start-usb-camera ${GREEN}[config]${BLUE}] ${GREEN}[--pull-always]${NC}"
     echo -e "${YELLOW}"
     echo -e "  --setenv:     Set environment variables without starting containers"
     echo -e "  --start:      Configure and bring up Live Video Search application"
@@ -79,6 +107,11 @@ if [ "$#" -eq 0 ] || ([ "$#" -eq 1 ] && [ "$1" = "--help" ]); then
     echo -e "  --clean-data: Bring down containers and remove docker volumes and networks"
     echo -e "  --help:       Show this help message"
     echo -e "  config:       Optional argument to print the resolved compose config"
+    echo -e "  --pull-always: With a --start* option, check the registry for every image and pull newer"
+    echo -e "                 ones (Compose up --pull always), so tags such as latest are refreshed."
+    echo -e "                 Alias --force-pull; same as PULL_ALWAYS=true. Images that exist only"
+    echo -e "                 locally are kept; a registry image with the same name and tag replaces"
+    echo -e "                 a locally built one."
     echo -e "-----------------------------------------------------------------"
     return 0
 elif [ "$#" -gt 2 ]; then
@@ -346,7 +379,9 @@ if [ "$1" = "--start-rtsp-test" ]; then
 elif [ "$1" = "--start-usb-camera" ]; then
     APP_COMPOSE_FILE="$APP_COMPOSE_FILE -f docker/compose.usb-camera.yaml"
 fi
-FINAL_ARG="up -d --remove-orphans" && [ "$2" = "config" ] && FINAL_ARG="config"
+FINAL_ARG="up -d --remove-orphans"
+[ "$lvs_pull_always" = true ] && FINAL_ARG="$FINAL_ARG --pull always"
+[ "$2" = "config" ] && FINAL_ARG="config"
 DOCKER_COMMAND="docker compose $APP_COMPOSE_FILE $FINAL_ARG"
 
 echo -e "${GREEN}Running Docker command: $DOCKER_COMMAND ${NC}"
