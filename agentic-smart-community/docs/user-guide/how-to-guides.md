@@ -5,6 +5,7 @@ Agentic Smart Community sample application.
 
 - [Add Swap Space](./how-to-guides/add-swap.md) — Instructions to add swap space to the MCP server for improved performance and stability.
 - [Register a New Use Case](./how-to-guides/register-new-use-case.md) — Step-by-step instructions to register a new use case with the MCP server and start monitoring it.
+- [Configure the Prefilter Model for a Monitor](./how-to-guides/configure-prefilter-model.md) — Instructions to register your own OpenVINO™ detection model and select it per monitor.
 - [MCP Tools Guide](./how-to-guides/mcp-tools.md) — Detailed reference for the MCP tools, including parameters, action enumerations, return shapes, and SQLite data model.
 
 <!--hide_directive
@@ -13,6 +14,7 @@ Agentic Smart Community sample application.
 
 Add Swap Space <./how-to-guides/add-swap.md>
 Register a New Use Case <./how-to-guides/register-new-use-case.md>
+Configure the Prefilter Model <./how-to-guides/configure-prefilter-model.md>
 MCP Tools Guide <./how-to-guides/mcp-tools.md>
 
 :::

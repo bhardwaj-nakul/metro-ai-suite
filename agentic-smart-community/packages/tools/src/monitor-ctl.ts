@@ -18,7 +18,7 @@ export interface IWorkerService {
 }
 
 export interface MonitorCtlParams {
-  action: "start" | "stop" | "register_source" | "unregister" | "status" | "list" | "prefilter_options" | "update_pipeline";
+  action: "start" | "stop" | "register_source" | "unregister" | "status" | "list" | "prefilter_options" | "update_pipeline" | "reload_config" | "register_prefilter_model";
   dry_run?: boolean;
   expected_revision?: string;
   candidate_hash?: string;
@@ -28,6 +28,21 @@ export interface MonitorCtlParams {
   use_case?: string;
   video_summary_task?: string;
   pipeline_config?: Record<string, unknown>;
+  /**
+   * Prefilter model registry key. With `prefilter_options`, narrows the query
+   * to that one model instead of listing every registered one. To put a monitor
+   * ON a model, set `pipeline_config.prefilter.model` at register_source — the
+   * analytics service rejects a raw `model_path` from a request.
+   */
+  model?: string;
+  /** Absolute path to the model's IR .xml (register_prefilter_model). */
+  model_path?: string;
+  /** What the model does; only `detection` is supported (register_prefilter_model). */
+  kind?: string;
+  /** Runtime executing the model; only `openvino` is supported (register_prefilter_model). */
+  backend?: string;
+  /** Free text shown to agents helping a user choose (register_prefilter_model). */
+  description?: string;
   webhook_url?: string;
   /**
    * Absolute path videostream-analytics should write this monitor's data to.
@@ -171,21 +186,133 @@ async function analyticsSourceExists(analyticsUrl: string, monitorId: string): P
 }
 
 /**
- * Fetch the prefilter model's capabilities (selectable `target_classes`) from
- * videostream-analytics. Returns the raw JSON: `{ enabled, model_path,
- * class_names, labels_source, available_devices }`. `labels_source` is
- * `embedded | fallback_coco | unavailable` — only `embedded` names are
+ * Fetch the selectable prefilter models from videostream-analytics. Returns the
+ * raw JSON: `{ enabled, default_model, supported_kinds, supported_backends,
+ * available_devices, models, rejected, ... }`. `models[].name` is what
+ * `pipeline_config.prefilter.model` accepts; `rejected` lists registered
+ * entries that cannot be used, with the reason. `labels_source` on each model
+ * is `embedded | fallback_coco | unavailable` — only `embedded` names are
  * authoritative; otherwise the list is a COCO guess the caller must confirm.
+ *
+ * With `model`, returns that one entry's detail instead (404 if it is not a
+ * usable registered model).
  */
-async function analyticsPrefilterOptions(analyticsUrl: string): Promise<unknown> {
-  const resp = await fetch(`${analyticsUrl}/capabilities/prefilter`, {
+async function analyticsPrefilterOptions(analyticsUrl: string, model?: string): Promise<unknown> {
+  const query = model ? `?model=${encodeURIComponent(model)}` : "";
+  const resp = await fetch(`${analyticsUrl}/capabilities/prefilter${query}`, {
     signal: AbortSignal.timeout(10_000),
   });
   if (!resp.ok) {
     const t = await resp.text().catch(() => "");
-    throw new Error(`analytics GET /capabilities/prefilter failed HTTP ${resp.status}: ${t.slice(0, 200)}`);
+    throw new Error(`analytics GET /capabilities/prefilter${query} failed HTTP ${resp.status}: ${t.slice(0, 200)}`);
   }
   return resp.json();
+}
+
+/**
+ * Ask analytics to re-read its configuration file and swap it in without a
+ * restart (POST /config/reload). Running sources are untouched; new
+ * registrations and capability queries see the reloaded registry. Returns the
+ * service's summary: { status, path, models, rejected }.
+ */
+async function analyticsReloadConfig(analyticsUrl: string): Promise<unknown> {
+  const resp = await fetch(`${analyticsUrl}/config/reload`, {
+    method: "POST",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => "");
+    throw new Error(`analytics POST /config/reload failed HTTP ${resp.status}: ${t.slice(0, 300)}`);
+  }
+  return resp.json();
+}
+
+/**
+ * Register a model into VSA's prefilter registry by editing its live
+ * configuration file (identity-mounted read-write into this container), then
+ * hot-reloading VSA and confirming through /capabilities/prefilter. The edit
+ * is written in place — a temp-file+rename would swap the host inode out from
+ * under the single-file bind mount and the change would never reach VSA.
+ *
+ * Idempotent: an existing entry with identical kind/backend/model_path is a
+ * no-op; a conflicting entry is an error (the user must resolve it — the
+ * registry entry may be deliberate operator config).
+ */
+async function registerPrefilterModel(analyticsUrl: string, params: MonitorCtlParams): Promise<unknown> {
+  const name = params.model?.trim();
+  if (!name) throw new Error("model (the registry key) is required for register_prefilter_model");
+  const modelPath = params.model_path?.trim();
+  if (!modelPath) throw new Error("model_path is required for register_prefilter_model");
+  if (!modelPath.startsWith("/")) throw new Error("model_path must be an absolute path");
+  const kind = params.kind ?? "detection";
+  const backend = params.backend ?? "openvino";
+
+  const configPath = process.env.VIDEOSTREAM_CONFIG_FILE;
+  if (!configPath) {
+    throw new Error("VIDEOSTREAM_CONFIG_FILE is not set on the MCP server; cannot edit the VSA configuration");
+  }
+  let doc;
+  try {
+    doc = parseDocument(readFileSync(configPath, "utf-8"));
+  } catch (err: any) {
+    throw new Error(`cannot read VSA config at ${configPath}: ${err.message} — run videostream-analytics/setup_vsa.sh first`);
+  }
+  if (!doc.hasIn(["prefilter_models"])) doc.setIn(["prefilter_models"], doc.createNode({}));
+
+  const existing = doc.getIn(["prefilter_models", name]);
+  const alreadyExisted = isMap(existing);
+  if (alreadyExisted) {
+    const same =
+      String(existing.get("model_path")) === modelPath &&
+      String(existing.get("kind") ?? "detection") === kind &&
+      String(existing.get("backend") ?? "openvino") === backend;
+    if (!same) {
+      throw new Error(
+        `prefilter model "${name}" is already registered with different settings ` +
+        `(model_path: ${String(existing.get("model_path"))}); edit the VSA config by hand or pick another name`,
+      );
+    }
+  } else {
+    doc.setIn(["prefilter_models", name], doc.createNode({
+      kind,
+      backend,
+      model_path: modelPath,
+      ...(params.description ? { description: params.description } : {}),
+    }));
+    writeFileSync(configPath, doc.toString(), "utf-8");
+  }
+
+  // VSA's config watcher would pick the edit up within seconds; reload
+  // explicitly so this call can confirm the outcome instead of "probably".
+  await analyticsReloadConfig(analyticsUrl);
+  const report = (await analyticsPrefilterOptions(analyticsUrl)) as any;
+  const usable = (report.models ?? []).find((m: any) => m.name === name);
+  if (usable) {
+    return {
+      model: name,
+      status: "selectable",
+      entry: usable,
+      config_file: configPath,
+      ...(alreadyExisted ? { note: "identical entry was already registered" } : {}),
+    };
+  }
+  const rejected = (report.rejected ?? []).find((r: any) => r.name === name);
+  if (rejected) {
+    return { model: name, status: "rejected", reason: rejected.reason, config_file: configPath };
+  }
+  // Written but absent from the report: VSA is reading a different file than
+  // the one just edited. Most often the host file was replaced (atomic save in
+  // an editor, `sed -i`) after this container started, so its single-file mount
+  // still points at the old inode and the write landed on an orphan; otherwise
+  // VIDEOSTREAM_CONFIG_FILE differs between the two services.
+  return {
+    model: name,
+    status: "written_not_listed",
+    config_file: configPath,
+    hint: "VSA is not reading the file just edited. If the config was recently saved with an " +
+      "editor or `sed -i`, restart the MCP server so it re-mounts the current file; " +
+      "otherwise check that VIDEOSTREAM_CONFIG_FILE is the same on both services",
+  };
 }
 
 async function analyticsDelete(analyticsUrl: string, monitorId: string): Promise<void> {
@@ -443,8 +570,17 @@ export async function monitorCtl(
       if (!monitor) throw new Error(`Monitor not found: ${params.monitor_id}`);
       try {
         const resp = await fetch(`${analyticsUrl}/sources/${params.monitor_id}/status`, { signal: AbortSignal.timeout(5000) });
-        if (resp.ok) return { ...monitor, analyticsReachable: true, analyticsStatus: await resp.json() };
-        return { ...monitor, analyticsReachable: false, analyticsStatus: null, analyticsError: `HTTP ${resp.status}` };
+        if (!resp.ok) return { ...monitor, analyticsReachable: false, analyticsStatus: null, analyticsError: `HTTP ${resp.status}` };
+        // The effective pipeline (defaults←source merge) is what the monitor
+        // actually runs — e.g. whether a monitor that never configured
+        // `prefilter` is filtering, and with which model/classes. Older VSA
+        // builds lack the endpoint; absence is not an error.
+        let analyticsPipeline: unknown = null;
+        try {
+          const p = await fetch(`${analyticsUrl}/sources/${params.monitor_id}/pipeline`, { signal: AbortSignal.timeout(5000) });
+          if (p.ok) analyticsPipeline = (await p.json()).pipeline ?? null;
+        } catch { /* older VSA without /pipeline — status alone is fine */ }
+        return { ...monitor, analyticsReachable: true, analyticsStatus: await resp.json(), analyticsPipeline };
       } catch (err: any) {
         return { ...monitor, analyticsReachable: false, analyticsStatus: null, analyticsError: err?.message ?? "unreachable" };
       }
@@ -453,7 +589,21 @@ export async function monitorCtl(
     // -----------------------------------------------------------------------
     case "prefilter_options": {
       // Read-only capability query — no monitor_id / DB / worker involvement.
-      return await analyticsPrefilterOptions(analyticsUrl);
+      return await analyticsPrefilterOptions(analyticsUrl, params.model);
+    }
+
+    // -----------------------------------------------------------------------
+    case "reload_config": {
+      // Hot-swap the analytics configuration without a restart — used after
+      // the operator edits the VSA config file (e.g. adds a prefilter model).
+      return await analyticsReloadConfig(analyticsUrl);
+    }
+
+    // -----------------------------------------------------------------------
+    case "register_prefilter_model": {
+      // No monitor_id / DB / worker involvement: edits the VSA config file,
+      // reloads, and confirms via the capabilities report.
+      return await registerPrefilterModel(analyticsUrl, params);
     }
 
     // -----------------------------------------------------------------------

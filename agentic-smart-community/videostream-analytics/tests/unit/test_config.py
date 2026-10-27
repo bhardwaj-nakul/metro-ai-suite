@@ -1,10 +1,12 @@
 """Tests for configuration loading and validation."""
 
+import logging
 import os
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from pydantic import ValidationError
 
@@ -61,9 +63,48 @@ class TestLoadConfig:
         assert config.server.host == "127.0.0.1"
         assert config.webhook.url == "http://localhost:3101/events"
 
+    def test_load_nonexistent_logs_warning(self, caplog):
+        # The built-in defaults carry an empty prefilter registry, so a missing
+        # file must not fall back silently.
+        with caplog.at_level(logging.WARNING, logger="shared.config"):
+            config = load_config("/nonexistent/path/config.yaml")
+        assert config.prefilter_models == {}
+        assert any(
+            r.levelno == logging.WARNING and "/nonexistent/path/config.yaml" in r.message
+            for r in caplog.records
+        )
+
+    def test_load_directory_path_raises_with_path_in_message(self, tmp_path):
+        # Docker auto-creates a missing bind-mount source as a directory; that
+        # failure mode must name the path, not crash with a bare IsADirectoryError.
+        with pytest.raises(IsADirectoryError, match=str(tmp_path)):
+            load_config(str(tmp_path))
+
+    def test_default_path_loads_shipped_example(self, monkeypatch, caplog):
+        # The code default must point at the tracked template — a rename that
+        # misses this reference turns every default startup into the warning path.
+        root = Path(__file__).resolve().parents[2]
+        example = root / "config" / "config.yaml.example"
+        assert example.is_file(), "shipped config template must exist"
+        monkeypatch.chdir(root)
+        monkeypatch.delenv("VIDEOSTREAM_CONFIG", raising=False)
+        with caplog.at_level(logging.WARNING, logger="shared.config"):
+            config = load_config()
+        assert "yolo11s" in config.prefilter_models
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_example_registry_path_expands_under_model_dir(self, monkeypatch):
+        root = Path(__file__).resolve().parents[2]
+        monkeypatch.setenv("PREFILTER_MODEL_DIR", "/models/openvino")
+        config = load_config(str(root / "config" / "config.yaml.example"))
+        assert (
+            config.prefilter_models["yolo11s"].model_path
+            == "/models/openvino/yolo11s/FP16/yolo11s.xml"
+        )
+
     def test_load_from_env_var(self, tmp_path):
         cfg_file = tmp_path / "env_config.yaml"
-        cfg_file.write_text("server:\n  port: 7777\n")
+        cfg_file.write_text('model_dir: "/tmp/models"\nserver:\n  port: 7777\n')
         with patch.dict(os.environ, {"VIDEOSTREAM_CONFIG": str(cfg_file)}):
             config = load_config(None)
             assert config.server.port == 7777
@@ -76,71 +117,143 @@ class TestLoadConfig:
         assert "~" not in config.data_dir
         assert config.data_dir == "/tmp/videostream-test-data"
 
-    def test_prefilter_model_path_env_var_expanded(self, tmp_path):
-        cfg_file = tmp_path / "mp_env.yaml"
+    def _registry_config(self, tmp_path, name, model_path, extra="", model_dir="/tmp/models"):
+        cfg_file = tmp_path / f"{name}.yaml"
         cfg_file.write_text(
+            f'model_dir: "{model_dir}"\n'
+            f"{extra}"
+            "prefilter_models:\n"
+            "  yolo11s:\n"
+            "    kind: detection\n"
+            f"    model_path: {model_path}\n"
             "defaults:\n"
             "  prefilter:\n"
             "    enabled: true\n"
-            '    model_path: "${HOME}/models/yolo11s.xml"\n'
+            "    model: yolo11s\n"
         )
-        config = load_config(str(cfg_file))
-        assert "$" not in config.defaults.prefilter.model_path
-        assert config.defaults.prefilter.model_path == os.path.expanduser(
-            "~/models/yolo11s.xml"
-        )
+        return str(cfg_file)
 
-    def test_prefilter_model_path_tilde_expanded(self, tmp_path):
-        cfg_file = tmp_path / "mp_tilde.yaml"
-        cfg_file.write_text(
-            "defaults:\n"
-            "  prefilter:\n"
-            "    model_path: ~/models/yolo11s.xml\n"
+    def test_registry_model_path_env_var_expanded(self, tmp_path):
+        cfg = self._registry_config(
+            tmp_path, "mp_env", '"${HOME}/models/yolo11s.xml"'
         )
-        config = load_config(str(cfg_file))
-        assert "~" not in config.defaults.prefilter.model_path
-        assert config.defaults.prefilter.model_path == os.path.expanduser(
-            "~/models/yolo11s.xml"
-        )
+        config = load_config(cfg)
+        resolved = config.prefilter_models["yolo11s"].model_path
+        assert "$" not in resolved
+        assert resolved == os.path.expanduser("~/models/yolo11s.xml")
 
-    def test_prefilter_empty_model_path_stays_empty(self, tmp_path):
-        # Absent model_path (class default "") must not blow up the expansion step.
-        cfg_file = tmp_path / "mp_empty.yaml"
-        cfg_file.write_text("defaults:\n  prefilter:\n    enabled: false\n")
-        config = load_config(str(cfg_file))
-        assert config.defaults.prefilter.model_path == ""
+    def test_registry_model_path_tilde_expanded(self, tmp_path):
+        cfg = self._registry_config(tmp_path, "mp_tilde", "~/models/yolo11s.xml")
+        config = load_config(cfg)
+        resolved = config.prefilter_models["yolo11s"].model_path
+        assert "~" not in resolved
+        assert resolved == os.path.expanduser("~/models/yolo11s.xml")
 
-    def test_prefilter_model_path_env_override(self, tmp_path):
-        # PREFILTER_MODEL overrides the config-file model_path (even a placeholder)
-        # and is expanded like the config value.
-        cfg_file = tmp_path / "mp_override.yaml"
-        cfg_file.write_text(
-            "defaults:\n"
-            "  prefilter:\n"
-            "    enabled: true\n"
-            "    model_path: /path/to/placeholder.xml\n"
-        )
-        with patch.dict(
-            os.environ, {"PREFILTER_MODEL": "${HOME}/models/real.xml"}, clear=False
-        ):
-            config = load_config(str(cfg_file))
-        assert config.defaults.prefilter.model_path == os.path.expanduser(
-            "~/models/real.xml"
-        )
-
-    def test_prefilter_model_path_no_env_keeps_config(self, tmp_path):
-        # Without PREFILTER_MODEL, the config-file model_path is preserved.
-        cfg_file = tmp_path / "mp_no_override.yaml"
-        cfg_file.write_text(
-            "defaults:\n"
-            "  prefilter:\n"
-            "    enabled: true\n"
-            "    model_path: /models/from_config.xml\n"
+    def test_registry_model_dir_placeholder_expanded(self, tmp_path):
+        """`${PREFILTER_MODEL_DIR}` resolves from `model_dir` even when unexported."""
+        cfg = self._registry_config(
+            tmp_path,
+            "mp_modeldir",
+            '"${PREFILTER_MODEL_DIR}/detect/yolo11s.xml"',
+            model_dir="/opt/models",
         )
         with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("PREFILTER_MODEL", None)
-            config = load_config(str(cfg_file))
-        assert config.defaults.prefilter.model_path == "/models/from_config.xml"
+            os.environ.pop("PREFILTER_MODEL_DIR", None)
+            config = load_config(cfg)
+        assert config.model_dir == "/opt/models"
+        assert (
+            config.prefilter_models["yolo11s"].model_path
+            == "/opt/models/detect/yolo11s.xml"
+        )
+
+    def test_registry_legacy_model_dir_placeholder_expanded(self, tmp_path):
+        """The pre-rename `${MODEL_DIR}` spelling keeps working."""
+        cfg = self._registry_config(
+            tmp_path,
+            "mp_legacy",
+            '"${MODEL_DIR}/detect/yolo11s.xml"',
+            model_dir="/opt/models",
+        )
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PREFILTER_MODEL_DIR", None)
+            config = load_config(cfg)
+        assert (
+            config.prefilter_models["yolo11s"].model_path
+            == "/opt/models/detect/yolo11s.xml"
+        )
+
+    def test_model_dir_env_override(self, tmp_path):
+        cfg = self._registry_config(
+            tmp_path, "mp_mdenv", '"${PREFILTER_MODEL_DIR}/yolo11s.xml"',
+            model_dir="/opt/models",
+        )
+        with patch.dict(os.environ, {"PREFILTER_MODEL_DIR": "/srv/models"}, clear=False):
+            config = load_config(cfg)
+        assert config.model_dir == "/srv/models"
+        assert config.prefilter_models["yolo11s"].model_path == "/srv/models/yolo11s.xml"
+
+    def test_unresolved_model_dir_placeholder_falls_back(self, tmp_path):
+        """A `${PREFILTER_MODEL_DIR}` value with nothing behind it must not
+        become a literal placeholder root — it falls back to the default."""
+        cfg = self._registry_config(
+            tmp_path,
+            "mp_fallback",
+            '"${PREFILTER_MODEL_DIR}/detect/yolo11s.xml"',
+            model_dir="${PREFILTER_MODEL_DIR}",
+        )
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PREFILTER_MODEL_DIR", None)
+            config = load_config(cfg)
+        assert "$" not in config.model_dir
+        assert config.model_dir == os.path.expanduser("~/models/openvino")
+        assert config.prefilter_models["yolo11s"].model_path == os.path.expanduser(
+            "~/models/openvino/detect/yolo11s.xml"
+        )
+
+    def test_model_dir_is_internal_and_defaults_from_env_or_builtin(self, tmp_path, monkeypatch):
+        """The config file carries no model_dir; the root comes from the env var."""
+        cfg_file = tmp_path / "no_model_dir.yaml"
+        cfg_file.write_text("server:\n  port: 7777\n")
+        monkeypatch.delenv("PREFILTER_MODEL_DIR", raising=False)
+        assert load_config(str(cfg_file)).model_dir == os.path.expanduser("~/models/openvino")
+        monkeypatch.setenv("PREFILTER_MODEL_DIR", "/srv/ov-models")
+        assert load_config(str(cfg_file)).model_dir == "/srv/ov-models"
+
+    def test_shipped_example_does_not_expose_model_dir(self):
+        """A key users can see is a key users will edit — and it would not take
+        effect under Docker, where the mount is fixed by the env var."""
+        example = Path(__file__).resolve().parents[2] / "config" / "config.yaml.example"
+        assert "model_dir" not in yaml.safe_load(example.read_text())
+
+    def test_empty_registry_stays_empty(self, tmp_path):
+        # No prefilter_models block must not blow up the expansion step.
+        cfg_file = tmp_path / "mp_empty.yaml"
+        cfg_file.write_text('model_dir: "/tmp/models"\ndefaults:\n  prefilter:\n    enabled: false\n')
+        config = load_config(str(cfg_file))
+        assert config.prefilter_models == {}
+        assert config.defaults.prefilter.model == ""
+
+    def test_registry_path_preserved_without_placeholders(self, tmp_path):
+        # A plain absolute path passes through expansion untouched.
+        cfg = self._registry_config(
+            tmp_path, "mp_no_override", "/models/from_config.xml"
+        )
+        config = load_config(cfg)
+        assert config.prefilter_models["yolo11s"].model_path == "/models/from_config.xml"
+
+    def test_backend_is_case_insensitive(self, tmp_path):
+        cfg_file = tmp_path / "mp_backend.yaml"
+        cfg_file.write_text(
+            'model_dir: "/tmp/models"\n'
+            "prefilter_models:\n"
+            "  m1:\n"
+            "    kind: Detection\n"
+            "    backend: OpenVINO\n"
+            "    model_path: /models/m1.xml\n"
+        )
+        config = load_config(str(cfg_file))
+        assert config.prefilter_models["m1"].backend == "openvino"
+        assert config.prefilter_models["m1"].kind == "detection"
 
 
 class TestConfigModels:
@@ -298,11 +411,11 @@ class TestSegmentDurationOrdering:
 
 class TestAllowedDataRoots:
     def test_defaults_to_empty(self):
-        assert AppConfig().allowed_data_roots == []
+        assert AppConfig(model_dir="/tmp/models").allowed_data_roots == []
 
     def test_expanded_on_load(self, tmp_path, monkeypatch):
         cfg_file = tmp_path / "config.yaml"
-        cfg_file.write_text('allowed_data_roots:\n  - "~/vsa-alt"\n')
+        cfg_file.write_text('model_dir: "/tmp/models"\nallowed_data_roots:\n  - "~/vsa-alt"\n')
         config = load_config(str(cfg_file))
         assert config.allowed_data_roots == [
             os.path.join(os.path.expanduser("~"), "vsa-alt")

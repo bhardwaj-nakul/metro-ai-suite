@@ -17,7 +17,7 @@
 #
 # Environment variables:
 #   HTTP_PROXY / HTTPS_PROXY  — Docker build proxy
-#   MODEL_DIR                 — YOLO model directory (default ~/models)
+#   PREFILTER_MODEL_DIR       — YOLO model directory (default ~/models/openvino)
 #   DATA_DIR                  — clip output directory (default /tmp/smart-community-clips)
 #   VSA_TEST_CHILD_VIDEO      — child scenario integration test video
 #   VSA_TEST_FRIDGE_VIDEO     — fridge multi-video test video
@@ -48,7 +48,7 @@ RTSP_PORT=8554
 WEBHOOK_PORT=9999
 ANALYTICS_PORT=8999
 DATA_DIR="${DATA_DIR:-/tmp/smart-community-clips}"
-MODEL_DIR="${MODEL_DIR:-$HOME/models}"
+PREFILTER_MODEL_DIR="${PREFILTER_MODEL_DIR:-$HOME/models/openvino}"
 
 # --- User-provided integration and evaluation videos ---
 VIDEO_CHILD="${VSA_TEST_CHILD_VIDEO:-}"
@@ -202,10 +202,11 @@ start_analytics_docker() {
         --name "$CONTAINER_NAME" \
         --network host \
         -e WEBHOOK_URL="http://localhost:$WEBHOOK_PORT/events" \
+        -e PREFILTER_MODEL_DIR="/models" \
         -e no_proxy="localhost,127.0.0.1" \
         -e http_proxy="" \
         -e https_proxy="" \
-        -v "$MODEL_DIR:/models:ro" \
+        -v "$PREFILTER_MODEL_DIR:/models:ro" \
         -v "/tmp:/tmp" \
         -v "$DATA_DIR:/root/.mcp-smart-community/segments" \
         "$DOCKER_IMAGE"
@@ -217,7 +218,7 @@ start_analytics_local() {
     info "Starting local videostream-analytics on :$ANALYTICS_PORT..."
     cd "$PROJECT_DIR"
     WEBHOOK_URL="http://localhost:$WEBHOOK_PORT/events" \
-    $PYTHON __main__.py --host 127.0.0.1 --port $ANALYTICS_PORT --config config/config.yaml &
+    $PYTHON __main__.py --host 127.0.0.1 --port $ANALYTICS_PORT --config config/config.yaml.example &
     LOCAL_SERVER_PID=$!
     PIDS_TO_KILL+=($LOCAL_SERVER_PID)
     sleep 3

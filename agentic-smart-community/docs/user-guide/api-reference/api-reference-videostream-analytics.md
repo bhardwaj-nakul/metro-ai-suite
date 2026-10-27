@@ -25,10 +25,11 @@ The service is a long-running single process. Each registered source spawns back
 | Method | Path | Purpose | See |
 |--------|------|---------|-----|
 | `GET`    | `/health` | Liveness probe. | §3.1 |
-| `GET`    | `/capabilities/prefilter` | Report the deployed prefilter model and available devices. | §3.2 |
+| `GET`    | `/capabilities/prefilter` | List the selectable prefilter models and available devices. | §3.2 |
 | `GET`    | `/sources` | List all registered sources (bare array). | §3.3 |
 | `GET`    | `/sources/{source_id}` | Get source status. | §3.4 |
 | `GET`    | `/sources/{source_id}/status` | Alias of `/sources/{source_id}`; the MCP server calls this to check for existence. | §3.4 |
+| `GET`    | `/sources/{source_id}/pipeline` | Get the source's effective (merged) pipeline configuration. | §3.4.1 |
 | `POST`   | `/register_source` | Register and start a new source. | §3.5 |
 | `DELETE` | `/sources/{source_id}` | Unregister a source. | §3.6 |
 | `POST`   | `/sources/{source_id}/stop` | Stop and unregister (equivalent to `DELETE`). | §3.6 |
@@ -37,6 +38,7 @@ The service is a long-running single process. Each registered source spawns back
 | `POST`   | `/sources/{source_id}/resume` | Resume a paused pipeline. | §3.8 |
 | `POST`   | `/sources/{source_id}/keepalive` | Refresh the keepalive timestamp. | §3.9 |
 | `PUT`    | `/sources/{source_id}/pipeline` | Hot-update supported pipeline configuration. | §3.10 |
+| `POST`   | `/config/reload` | Re-read the configuration file and swap it in without a restart. | §3.11 |
 
 ---
 
@@ -68,26 +70,75 @@ Liveness probe.
 
 ### 3.2 `GET /capabilities/prefilter`
 
-Report the prefilter capabilities of the deployed model.
+Report the prefilter models a monitor may select, and the inference devices this host offers.
 
-**Request**: no body.
+```bash
+curl -s localhost:8999/capabilities/prefilter                  # full report
+curl -s 'localhost:8999/capabilities/prefilter?model=yolo11s'  # one model's detail
+```
+
+**Query parameters**:
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `model` | `string` | Optional. Appended as `?model=<name>` (URL-encode the value). Return just that model's entry (the object shape of a `models[]` element) instead of the full report. `404` when the name is not a usable registered model. |
 
 **Response 200**:
 
 ```json
 {
-  "enabled": true,
-  "model_path": "/models/yolo11s.xml",
-  "class_names": ["person", "car"],
-  "labels_source": "embedded",
-  "available_devices": ["CPU", "GPU"]
+  "default_model": "yolo11s",
+  "supported_kinds": ["detection"],
+  "supported_backends": ["openvino"],
+  "available_devices": ["CPU", "GPU", "NPU"],
+  "models": [
+    {
+      "name": "yolo11s",
+      "kind": "detection",
+      "backend": "openvino",
+      "model_path": "/home/user/models/openvino/yolo11s/FP16/yolo11s.xml",
+      "description": "YOLO11s FP16, static 1280x704 input, COCO-80 classes",
+      "class_names": ["person", "car"],
+      "labels_source": "embedded",
+      "input_shape": "[1,3,704,1280]",
+      "output_shape": "[1,84,18480]"
+    }
+  ],
+  "rejected": [
+    { "name": "helmet_v2", "model_path": "...", "reason": "cannot read .../helmet_v2.bin: No such file or directory" }
+  ]
 }
 ```
 
+`models` is the selectable set — only these `name` values are accepted as
+`pipeline.prefilter.model`. `rejected` lists registered entries that failed
+validation, each with the reason; it is an operator diagnostic and those names
+are not selectable. `default_model` names the registry key a source inherits
+when it does not name one itself; that entry's detail is inside `models[]`
+(or fetched alone via `?model=<name>`) — the report intentionally carries no
+flattened duplicate of it.
+
 `labels_source` is `embedded` when the model exposes authoritative labels. It
 may be `fallback_coco` or `unavailable`; clients must not treat those values as
-an authoritative model class list. When the configured model is unavailable,
-`class_names` is an empty array.
+an authoritative model class list.
+
+`input_shape` with no `?` is static and therefore NPU-capable; a dynamic shape
+must run on `CPU` or `GPU`.
+
+### 3.2.1 Model registration
+
+An entry becomes selectable only when every check passes:
+
+1. `kind` is in `supported_kinds`;
+2. `backend` is in `supported_backends`;
+3. `model_path`, after symlink resolution, is under `PREFILTER_MODEL_DIR`;
+4. the path ends in `.xml` and both it and the sibling `.bin` exist and are non-empty;
+5. OpenVINO™ can read the model;
+6. the output tensor is detection-shaped — rank 3, `[1, 4+nc, anchors]` — and, when labels are `embedded`, `nc` equals the label count.
+
+Rules 4–6 are specific to the `openvino` backend; 1–3 apply to every entry. A
+failure at any step puts the entry in `rejected` rather than failing startup, so
+one bad entry never stops the service from serving its other monitors.
 
 ### 3.3 `GET /sources`
 
@@ -153,6 +204,32 @@ Return the status of a single source. Both paths dispatch to the same handler an
 { "detail": "Source not found: cam_xxx" }
 ```
 
+### 3.4.1 `GET /sources/{source_id}/pipeline`
+
+Return the source's **effective pipeline**: every block is the per-source value merged over the deployment defaults, so a source that never configured `prefilter` shows the inherited default here. This answers "what is this monitor actually running" — whether it filters, with which model and which classes — without access to the configuration file. `prefilter.model_path` is omitted (it is a resolved server path; §3.2 publishes it per model). `keepalive` reflects the effective block even though it is not part of the `PipelineConfig` request shape.
+
+**Response 200**:
+
+```json
+{
+  "source_id": "cam_child",
+  "pipeline": {
+    "motion":    { "enabled": true, "diff_threshold": 25, "area_ratio": 0.015, "stable_frames": 30 },
+    "segment":   { "max_duration": 10.0, "min_duration": 1.0 },
+    "prefilter": { "enabled": true, "model": "yolo11s", "target_classes": ["person"],
+                   "min_confidence": 0.4, "min_frames_hit": 2, "detect_fps": 2.0, "device": "NPU" },
+    "recording": { "enabled": true, "interval_seconds": 60, "fps": 15 },
+    "keepalive": { "enabled": true, "timeout_seconds": 90.0, "check_interval_seconds": 10.0 }
+  }
+}
+```
+
+Blocks the source does not run (e.g. `roi` when ROI was never configured) are `null`.
+
+**Response 404** when the source is not registered.
+
+---
+
 ### 3.5 `POST /register_source`
 
 Register a new source and start its pipeline. Idempotent: re-registering an id that is already running returns `{"status": "already_running"}` without changes.
@@ -175,9 +252,9 @@ The nested pipeline object (`extra="forbid"`). Every sub-block is optional. Expl
 supplied sub-block are merged onto the corresponding `defaults.<sub_block>`; omitted fields retain
 their defaults, so a request may override only the values that need to differ.
 
-The values below are the defaults in the shipped `videostream-analytics/config/config.yaml` used
-by `setup_docker.sh`. A deployment that loads a different `VIDEOSTREAM_CONFIG` inherits the
-`defaults` blocks from that file instead.
+The values below are the defaults in the shipped `videostream-analytics/config/config.yaml.example`
+template, which `setup_vsa.sh` renders into your live configuration on every run (see §7). A deployment that loads a
+different `VIDEOSTREAM_CONFIG` inherits the `defaults` blocks from that file instead.
 
 | Sub-block | Model | Purpose |
 |-----------|-------|---------|
@@ -218,8 +295,9 @@ by `setup_docker.sh`. A deployment that loads a different `VIDEOSTREAM_CONFIG` i
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `bool` | `true` | Enable OpenVINO™ YOLO prefilter on motion clips. |
-| `model_path` | `string` | Generated from `PREFILTER_MODEL` | Absolute path to the OpenVINO™ `.xml` model. When supplied in a request it must resolve (after symlinks) inside a permitted model root — the directory of `defaults.prefilter.model_path`, plus anything in `security.allowed_model_roots` — otherwise the request is rejected with 400. Omit it to inherit the deployment default, which is what the MCP server does; the stored value is the resolved path. |
-| `target_classes` | `array<string>` | `["person"]` | Class labels that count as a hit. |
+| `model` | `string` | `defaults.prefilter.model` | Name of a `prefilter_models` entry (§5.1). Must be one of the `models[].name` values from §3.2, otherwise the request is rejected with 422. Omit it to inherit the deployment default — for `PUT /sources/{id}/pipeline`, to keep the model the source is already running. |
+| `model_path` | — | — | **Not accepted in a request.** Models are selected by registry name; a request carrying `model_path` is rejected with 422. The server fills this field from the named entry, and it is the path the running pipeline loads. |
+| `target_classes` | `array<string>` | `["person"]` | Class labels that count as a hit. Rejected with 422 when a name is absent from the model's `class_names` and `labels_source` is `embedded`. |
 | `min_confidence` | `float` | `0.4` | Minimum detection confidence. Must be within 0–1. |
 | `min_frames_hit` | `int` | `1` | Number of hits within a clip required for PASS. Must be ≥ 1. |
 | `detect_fps` | `float` | `2.0` | YOLO inference rate; inference does not run on every frame. Must be > 0. |
@@ -273,7 +351,7 @@ by `setup_docker.sh`. A deployment that loads a different `VIDEOSTREAM_CONFIG` i
     "segment":   { "max_duration": 10, "min_duration": 1.0 },
     "prefilter": {
       "enabled": true,
-      "model_path": "/models/yolo11s.xml",
+      "model": "yolo11s",
       "target_classes": ["person"],
       "detect_fps": 2.0,
       "device": "NPU"
@@ -447,6 +525,51 @@ restarting the pipeline.
 
 ---
 
+### 3.11 `POST /config/reload`
+
+Re-read the configuration file and swap it in without restarting the service — the way to
+apply an edited configuration (a new `prefilter_models` entry, tuned `defaults`, a changed
+`webhook.url`) without dropping every running source's pipeline.
+
+The service also **watches the file and reloads automatically** within a couple of seconds
+of an edit (one `stat` per 2s poll; the parse + registry validation only runs on an actual
+change). Calling this endpoint is the explicit form of the same operation: use it when you
+want the reload to happen now, or its response as confirmation.
+
+**Semantics**:
+
+- Running sources are untouched; their pipelines were merged at registration. The reloaded
+  configuration applies to new `register_source` calls, `PUT /sources/{id}/pipeline` updates,
+  `GET /capabilities/prefilter`, and the default webhook sink.
+- The service reads `--reload-config` when it is set and exists — the compose deployment
+  points it at `/host-config/config.yaml`, a directory bind-mount view of the same file.
+  This matters because a single-file bind mount pins the inode the container started with,
+  so edits saved atomically (VS Code, vim, `sed -i` — anything that writes a temp file and
+  renames) never become visible through it; a directory mount reflects renames immediately.
+  Without `--reload-config` (or if it does not exist), the startup `--config` path is read.
+- A missing file answers **400** (`config_not_found`) and an unparsable or schema-invalid
+  file answers **422** (`config_invalid`): in both cases the running configuration is kept.
+  Reload never falls back to built-in defaults — that would silently empty the model registry.
+
+**Request**: empty body.
+
+```bash
+curl -X POST localhost:8999/config/reload
+```
+
+**Response 200** — the post-reload registry, so the caller can confirm immediately:
+
+```json
+{
+  "status": "reloaded",
+  "path": "/host-config/config.yaml",
+  "models": ["yolo11s", "helmet_v2"],
+  "rejected": []
+}
+```
+
+---
+
 ## 4. Event Plane — VSA → Downstream Webhook
 
 Every event produced by a running source is delivered as an HTTP POST to the configured webhook URL. The envelope shape is aligned with the MCP `events-endpoint` (see [MCP Webhook Event API Reference](./api-reference-mcp-webhook-event.md) for the receiving contract).
@@ -602,6 +725,19 @@ Retention responsibilities:
 
 ## 7. Ports and Environment
 
+Four paths come up around configuration, and they are easy to confuse:
+
+- `videostream-analytics/config/config.yaml.example` — the tracked **template**, and the place for changes that must survive a deploy. Editing it does not affect a running instance until the next `setup_vsa.sh` / `setup_docker.sh` run.
+- `${VIDEOSTREAM_CACHE_HOST}/config.yaml` (default `~/.cache/.videostream-analytics/config.yaml`) — **your live configuration**, regenerated from the template by `videostream-analytics/setup_vsa.sh` on every run. An identical file is left untouched; a differing one is first saved as `config.yaml.<YYYYMMDD-HHMMSS>.bak` beside it. Edit it for an immediate (hot-reloaded) trial; durable changes go in the template.
+- `videostream-analytics/config/config.yaml` — a **symlink** `setup_vsa.sh` creates to your live configuration, so the familiar in-tree path edits the same file. Ignored by git.
+- `/app/config/config.yaml` — the **mount point** your live configuration is bind-mounted at inside the container.
+
+Ports around the service:
+
+- `:8999` — VSA service (this document).
+- `:3101` — MCP server `events-endpoint`, the default webhook target in the standard deployment.
+- `:8554` — MediaMTX RTSP server in the demo quick-start; the typical `source_url` upstream.
+
 | Env / Config | Default | Purpose |
 |--------------|---------|---------|
 | `server.host` / `server.port` | `127.0.0.1:8999` | HTTP bind address. Loopback by default because the service is unauthenticated; widen only for a cross-host deployment that adds its own authentication. |
@@ -611,29 +747,39 @@ Retention responsibilities:
 | `security.allowed_source_schemes` | `["rtsp", "rtsps", "http", "https"]` | Schemes accepted in a register `source_url`. The URL is handed to `ffmpeg -i` verbatim, and ffmpeg can open local files and exotic inputs without this gate. |
 | `security.allow_file_source` | `false` | Also allow `file://` sources. Enable only for offline evaluation against sample clips on disk; in any shared deployment it is an arbitrary-file-read. |
 | `security.ffmpeg_protocol_whitelist` | `[file, crypto, rtp, udp, tcp, tls, rtsp, rtsps, http, https]` | Passed to ffmpeg as `-protocol_whitelist` — a second gate inside ffmpeg itself, so an input that slips past the scheme check still cannot be opened. `file` and `crypto` are required by the segment muxer's own output handling. |
-| `security.allowed_model_roots` | `[]` (empty) | Additional roots a request-supplied `prefilter.model_path` may live under, on top of the directory holding `defaults.prefilter.model_path`. Empty means that one directory is the only permitted root — enough for the standard deployment, since neither the MCP server nor the API test suite ever sends `model_path`. A request-supplied path reaches `read_model()` both during validation and in the running pipeline, so leaving it unconfined on an unauthenticated API is a file-existence oracle plus an arbitrary-file-parse primitive. Set this only for a deployment that genuinely switches models over the API. |
+| `prefilter_models` | `{}` (empty) | The models a monitor may select, keyed by the name `prefilter.model` uses. See §5.1. |
+| `defaults.prefilter.model` | — | Registry key sources inherit when they do not name one themselves. |
 | `SMART_COMMUNITY_DATA_DIR` | `~/.mcp-smart-community` | Overrides the platform data root; VSA writes under its `segments/` subdirectory. |
-| `VIDEOSTREAM_CONFIG` | `config/config.yaml` | Alternate configuration file path. |
-| `PREFILTER_MODEL` | `~/models/openvino/yolo11s/FP16/yolo11s.xml` | OpenVINO™ prefilter XML. `setup_docker.sh` validates the XML/BIN pair before startup and prepares the static YOLO11s IR automatically when it is missing. The model must be under `MODEL_DIR`, which is mounted read-only into the container. |
-| `VIDEOSTREAM_CONFIG_FILE` | Generated by `setup_docker.sh` | Host-side runtime configuration mounted at `/app/config/config.yaml` by Docker Compose. It is generated from the tracked default with `defaults.prefilter.model_path` set to the absolute `PREFILTER_MODEL` path. |
+| `PREFILTER_MODEL_DIR` | `~/models/openvino` | The root every registered prefilter model must live under — a model outside it is rejected, because the container only mounts this directory (read-only, at the same path). Also what `${PREFILTER_MODEL_DIR}` in `config.yaml` expands to. There is deliberately no matching key in `config.yaml`: the mount is fixed by this variable, so a copy in the file could only disagree with it. Subdirectory layout below the root is unconstrained. Docker Compose passes it into the container as well as using it for the read-only bind mount — the container sets `HOME=/tmp`, so a `~/models/openvino` fallback would resolve elsewhere. |
+| `VIDEOSTREAM_CACHE_HOST` | `~/.cache/.videostream-analytics` | Your configuration home. `setup_vsa.sh` regenerates `config.yaml` here on every run, keeping a differing previous copy as `config.yaml.<YYYYMMDD-HHMMSS>.bak`; also pre-created by `docker/set_env.sh` so Docker never makes a root-owned directory. |
+| `VIDEOSTREAM_CONFIG` | `config/config.yaml.example` | Alternate configuration file path. |
+| `VIDEOSTREAM_CONFIG_FILE` | `${VIDEOSTREAM_CACHE_HOST}/config.yaml` | Your live configuration, regenerated by `setup_vsa.sh` from the example template on every run (a differing previous copy is kept as a timestamped `.bak`). Docker Compose bind-mounts it at `/app/config/config.yaml`; `videostream-analytics/config/config.yaml` is a symlink to it for convenient editing. Rendering pins the default model's registry `model_path` to the absolute, validated paths. |
 | `OV_CACHE_DIR` | `/tmp/ov_cache` | OpenVINO™ model cache used by the YOLO prefilter. |
 
-Ports used by the service and local verification recipes:
+### 5.1 `prefilter_models`
 
-- `:8554` — MediaMTX RTSP server (upstream).
-- `:8999` — VSA service (this document).
-- `:9999` — Mock webhook receiver used by integration tests.
-- `:3101` — Production MCP `events-endpoint` (replaces the mock in end-to-end scenarios).
+Each entry declares one selectable model. Registration makes a model *eligible*;
+it becomes *selectable* only after passing the validation in §3.2.1.
 
----
+```yaml
+prefilter_models:
+  yolo11s:
+    kind: detection
+    backend: openvino
+    model_path: "${PREFILTER_MODEL_DIR}/yolo11s/FP16/yolo11s.xml"
+    description: "YOLO11s FP16, static 1280x704 input, COCO-80 classes"
+```
 
-## 8. Verification
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `kind` | `string` | — | Required. What the model does. Supported: `detection`. |
+| `backend` | `string` | `"openvino"` | Runtime that executes it, case-insensitive. Supported: `openvino`. |
+| `model_path` | `string` | — | Required. Absolute path to the IR `.xml`, under `PREFILTER_MODEL_DIR`. `${PREFILTER_MODEL_DIR}`, `${HOME}` and `~` are expanded. |
+| `description` | `string` | `""` | Free text, surfaced to agents helping a user choose a model. |
 
-Use the following test suites for unit and integration verification:
-
-- Unit tests: `pytest tests/unit/ --timeout=60` — expected `210 passed`.
-- Integration tests: `pytest tests/integration/ -m integration --timeout=300` — expected `27 passed` (requires MediaMTX, mock webhook, and ffmpeg producer).
-- Manual verification (`V1`–`V12`) covers the `/health` probe, source registration, lifecycle transitions, motion / recording event delivery, health strategies, CLI, real MCP integration, keepalive, and trajectory + ROI crop.
+Unknown fields are rejected. `kind` and `backend` accept one value each today;
+they are validated rather than assumed so a future model type or runtime needs
+no change to how monitors are configured.
 
 ---
 

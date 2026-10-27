@@ -143,7 +143,7 @@ def mock_pipeline_class():
 @pytest.fixture
 def manager(mock_pipeline_class):
     with patch("source_worker.WebhookSink"):
-        mgr = SourceManager(AppConfig())
+        mgr = SourceManager(AppConfig(model_dir="/tmp/models"))
     return mgr
 
 
@@ -269,7 +269,7 @@ def api_client():
     """Create test client using the actual service.create_app."""
     from service import create_app
 
-    config = AppConfig()
+    config = AppConfig(model_dir="/tmp/models")
     app = create_app(config)
 
     with patch("source_worker.StreamPipeline") as mock_cls, \
@@ -334,57 +334,103 @@ class TestUpdatePipelineEndpoint:
         assert resp.status_code == 200
 
 
+def _register_prefilter_model(api_client, tmp_path, name="m1"):
+    """Register a usable model and return (name, inspect_model patch)."""
+    from unittest.mock import patch
+
+    from shared.config import PrefilterModelConfig
+    from shared.model_registry import ModelShapeInfo
+
+    model = tmp_path / f"{name}.xml"
+    model.write_text("<net/>")
+    (tmp_path / f"{name}.bin").write_bytes(b"\x00")
+    config = api_client.app.state.config
+    config.model_dir = str(tmp_path.parent)
+    config.prefilter_models[name] = PrefilterModelConfig(
+        kind="detection", model_path=str(model)
+    )
+    info = ModelShapeInfo(
+        class_names=["person", "knife"],
+        labels_source="embedded",
+        input_shape="[1,3,640,640]",
+        output_shape="[1,6,8400]",
+        is_detection=True,
+    )
+    return name, patch(
+        "stream_monitor.pipeline.prefilter_yolo.inspect_model", return_value=info
+    )
+
+
 class TestUpdatePipelineTargetClassesValidation:
-    def test_update_rejects_unknown_target_class(self, api_client, monkeypatch, tmp_path):
+    def test_update_rejects_unknown_target_class(self, api_client, tmp_path):
         """PUT /pipeline must 422 on a target_class absent from embedded labels."""
-        import stream_monitor.pipeline.prefilter_yolo as pf
-        monkeypatch.setattr(pf, "read_model_labels",
-                            lambda p: (["person", "knife"], "embedded"))
-        model = tmp_path / "model.xml"
-        model.write_text("<net/>")
-        # A request-supplied model_path is confined to the permitted model roots
-        # (service.validate_model_path). `AppConfig()` configures none, so the
-        # tmp dir has to be allowed explicitly or the PUT is a 400 before
-        # target_classes are ever looked at.
-        api_client.app.state.config.security.allowed_model_roots.append(str(tmp_path))
+        name, stub = _register_prefilter_model(api_client, tmp_path)
         api_client.post("/register_source", json=_REG_BODY)
-        resp = api_client.put("/sources/cam1/pipeline", json={
-            "pipeline": {
-                "prefilter": {
-                    "enabled": True,
-                    "model_path": str(model),
-                    "target_classes": ["person", "helmets"],
+        with stub:
+            resp = api_client.put("/sources/cam1/pipeline", json={
+                "pipeline": {
+                    "prefilter": {
+                        "enabled": True,
+                        "model": name,
+                        "target_classes": ["person", "helmets"],
+                    },
                 },
-            },
-        })
+            })
         assert resp.status_code == 422
         detail = resp.json()["detail"]
         assert detail["error"] == "unknown target_classes"
         assert detail["unknown"] == ["helmets"]
 
-    def test_update_accepts_valid_target_class(self, api_client, monkeypatch, tmp_path):
-        import stream_monitor.pipeline.prefilter_yolo as pf
-        monkeypatch.setattr(pf, "read_model_labels",
-                            lambda p: (["person", "knife"], "embedded"))
-        model = tmp_path / "model.xml"
-        model.write_text("<net/>")
-        # A request-supplied model_path is confined to the permitted model roots
-        # (service.validate_model_path). `AppConfig()` configures none, so the
-        # tmp dir has to be allowed explicitly or the PUT is a 400 before
-        # target_classes are ever looked at.
-        api_client.app.state.config.security.allowed_model_roots.append(str(tmp_path))
+    def test_update_accepts_valid_target_class(self, api_client, tmp_path):
+        name, stub = _register_prefilter_model(api_client, tmp_path)
         api_client.post("/register_source", json=_REG_BODY)
-        resp = api_client.put("/sources/cam1/pipeline", json={
-            "pipeline": {
-                "prefilter": {
-                    "enabled": True,
-                    "model_path": str(model),
-                    "target_classes": ["knife"],
+        with stub:
+            resp = api_client.put("/sources/cam1/pipeline", json={
+                "pipeline": {
+                    "prefilter": {
+                        "enabled": True,
+                        "model": name,
+                        "target_classes": ["knife"],
+                    },
                 },
-            },
-        })
+            })
         assert resp.status_code == 200
         assert resp.json()["status"] == "updated"
+
+    def test_update_rejects_request_model_path(self, api_client):
+        api_client.post("/register_source", json=_REG_BODY)
+        resp = api_client.put("/sources/cam1/pipeline", json={
+            "pipeline": {"prefilter": {"enabled": True, "model_path": "/etc/passwd"}},
+        })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "model_path is not accepted"
+
+    def test_partial_update_keeps_the_sources_own_model(self, api_client, tmp_path):
+        """A PUT that touches only min_confidence must not reset the model.
+
+        The override is merged onto the source's *effective* prefilter config,
+        so resolving an omitted `model` to the deployment default would silently
+        move the source off the model it was registered with.
+        """
+        import service as service_module
+        from shared.config import PrefilterConfig
+
+        other, stub = _register_prefilter_model(api_client, tmp_path, name="other")
+        default, _ = _register_prefilter_model(api_client, tmp_path, name="deployment")
+        api_client.app.state.config.defaults.prefilter.model = default
+
+        with stub:
+            assert api_client.post("/register_source", json=_REG_BODY).status_code == 200
+            pipeline = service_module._manager._bundles["cam1"].pipeline
+            pipeline.source.prefilter = PrefilterConfig(enabled=True, model=other)
+            resp = api_client.put("/sources/cam1/pipeline", json={
+                "pipeline": {"prefilter": {"min_confidence": 0.8}},
+            })
+        assert resp.status_code == 200
+
+        _, kwargs = pipeline.update_pipeline_config.call_args
+        assert kwargs["prefilter"].model == other
+        assert kwargs["prefilter"].model_path == str(tmp_path / f"{other}.xml")
 
 
 class TestDeleteSourceEndpoint:

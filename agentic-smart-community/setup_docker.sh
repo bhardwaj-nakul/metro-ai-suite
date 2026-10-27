@@ -31,11 +31,22 @@ if [ -f "${DOCKER_DIR}/set_env.sh" ]; then
   source "${DOCKER_DIR}/set_env.sh"
 fi
 
+# videostream-analytics preparation (model validation + config seeding) lives in
+# its own script so the service can also be installed standalone. Sourcing only
+# defines the vsa_* functions; nothing runs until vsa_prepare is called below.
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/videostream-analytics/setup_vsa.sh"
+
 SERVICE_PORT=${SERVICE_PORT:-8192}
 VLLM_SERVICE_PORT=${VLLM_SERVICE_PORT:-41091}
 
-# Default action flags
+# Default action flags. With an unset or `latest` TAG, a start builds locally only
+# the images that are missing and runs the ones already present as they are (see
+# the build step below); a pinned TAG keeps the original pull-and-start behaviour.
+# Every build uses the Docker layer cache; --no-cache discards it.
 BUILD_IMAGE=false
+BUILD_NO_CACHE=false
+SKIP_BUILD=false
 UP_CONTAINERS=true
 DOWN_CONTAINERS=false
 LIGHT_MODE=false
@@ -359,10 +370,17 @@ Smart-Community Docker Setup
 Usage: $0 [option]
 
 Options:
-  (no option) | --prod   End-to-end: build-less start of all three services
+  (no option) | --prod   End-to-end start of all three services. With TAG unset or `latest`,
+                         images that are missing are built locally and existing ones run as
+                         they are; with a pinned TAG the images are pulled
                          (vllm-ipex-serving + multilevel-video-understanding + videostream-analytics)
   --light                Reuse an already-healthy serving at VLM_BASE_URL/LLM_BASE_URL;
                          start multilevel-video-understanding + videostream-analytics only
+                         (missing images are built for `latest`, as above)
+  --no-cache             Build without the Docker layer cache (a clean rebuild; use with
+                         --build, --build-prod, or the automatic build of missing images)
+  --no-build             Never build, even when an image is missing for `latest`; use the
+                         images already present or pulled (e.g. --light --no-build)
   --fetch                Only clone/refresh edge-ai-libraries (multilevel build context), no build/start
   --build                Build the local images (multilevel + videostream-analytics
                          + smart-community-mcp-server), no start
@@ -393,6 +411,8 @@ while [[ $# -gt 0 ]]; do
     --build)      BUILD_IMAGE=true;  UP_CONTAINERS=false; DOWN_CONTAINERS=false; shift ;;
     --prod)       BUILD_IMAGE=false; UP_CONTAINERS=true;  DOWN_CONTAINERS=false; shift ;;
     --light)      BUILD_IMAGE=false; UP_CONTAINERS=true;  DOWN_CONTAINERS=false; LIGHT_MODE=true; shift ;;
+    --no-build)   SKIP_BUILD=true; shift ;;
+    --no-cache)   BUILD_NO_CACHE=true; shift ;;
     --fetch)      BUILD_IMAGE=false; UP_CONTAINERS=false; DOWN_CONTAINERS=false; FETCH_ONLY=true; shift ;;
     --down)       BUILD_IMAGE=false; UP_CONTAINERS=false; DOWN_CONTAINERS=true;  shift ;;
     --light-down) BUILD_IMAGE=false; UP_CONTAINERS=false; DOWN_CONTAINERS=false; LIGHT_DOWN=true; shift ;;
@@ -412,72 +432,6 @@ export REGISTRY="${REGISTRY_URL}${PROJECT_NAME}"
 MULTILEVEL_IMAGE="${REGISTRY:-}multilevel-video-understanding:${TAG:-latest}"
 VSA_IMAGE="${REGISTRY:-}videostream-analytics:${TAG:-latest}"
 MCP_IMAGE="${REGISTRY:-}smart-community-mcp-server:${TAG:-latest}"
-DEFAULT_PREFILTER_MODEL="${HOME}/models/openvino/yolo11s/FP16/yolo11s.xml"
-MODEL_DIR="${MODEL_DIR:-${HOME}/models}"
-export MODEL_DIR
-
-prepare_videostream_config() {
-  local prefilter_bin prefilter_model runtime_config source_config helper_script model_dir
-
-  prefilter_model="${PREFILTER_MODEL:-$DEFAULT_PREFILTER_MODEL}"
-  case "$prefilter_model" in
-    '~') prefilter_model="$HOME" ;;
-    '~/'*) prefilter_model="$HOME/${prefilter_model#~/}" ;;
-  esac
-
-  if [[ "$prefilter_model" != *.xml ]]; then
-    echo "PREFILTER_MODEL must reference a .xml OpenVINO IR; using ${DEFAULT_PREFILTER_MODEL}."
-    prefilter_model="$DEFAULT_PREFILTER_MODEL"
-  fi
-
-  prefilter_model="$(realpath -m "$prefilter_model")"
-  prefilter_bin="${prefilter_model%.xml}.bin"
-  if [[ ! -s "$prefilter_model" || ! -s "$prefilter_bin" ]]; then
-    echo "Prefilter model is missing or incomplete: ${prefilter_model}"
-    echo "Preparing the YOLO11s OpenVINO IR automatically..."
-    helper_script="${SCRIPT_DIR}/scripts/helpers/prepare_yolo11s.sh"
-    PREFILTER_MODEL="$prefilter_model" bash "$helper_script"
-  fi
-
-  if [[ ! -s "$prefilter_model" || ! -s "$prefilter_bin" ]]; then
-    echo -e "${RED}Error: prefilter preparation did not create a complete IR pair: ${prefilter_model}${NC}"
-    exit 1
-  fi
-  prefilter_model="$(realpath -e "$prefilter_model")"
-
-  model_dir="$(realpath -m "$MODEL_DIR")"
-  if [[ "$prefilter_model" != "$model_dir/"* ]]; then
-    echo -e "${RED}Error: PREFILTER_MODEL must be under MODEL_DIR (${model_dir}) so the container can read it.${NC}"
-    exit 1
-  fi
-
-  source_config="${SCRIPT_DIR}/videostream-analytics/config/config.yaml"
-  runtime_config="${SCRIPT_DIR}/.docker/videostream-analytics.config.yaml"
-  mkdir -p "$(dirname "$runtime_config")"
-  PREFILTER_MODEL="$prefilter_model" python3 - "$source_config" "$runtime_config" <<'PY'
-import os
-import sys
-import tempfile
-
-import yaml
-
-source_path, output_path = sys.argv[1:]
-with open(source_path, encoding="utf-8") as source_file:
-    config = yaml.safe_load(source_file) or {}
-
-config.setdefault("defaults", {}).setdefault("prefilter", {})["model_path"] = os.environ["PREFILTER_MODEL"]
-output_dir = os.path.dirname(output_path)
-with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=output_dir, delete=False) as output_file:
-    yaml.safe_dump(config, output_file, default_flow_style=False, sort_keys=False)
-    temporary_path = output_file.name
-os.replace(temporary_path, output_path)
-PY
-
-  export PREFILTER_MODEL="$prefilter_model"
-  export VIDEOSTREAM_CONFIG_FILE="$runtime_config"
-  echo "Using prefilter model: ${PREFILTER_MODEL}"
-  echo "Using runtime videostream configuration: ${VIDEOSTREAM_CONFIG_FILE}"
-}
 
 cd "$DOCKER_DIR" || { echo -e "${RED}Error: cannot cd to $DOCKER_DIR${NC}"; exit 1; }
 DOCKER_CMD="docker compose -f compose.yaml"
@@ -492,15 +446,31 @@ if [ "$FETCH_ONLY" = true ]; then
 fi
 
 # --- build --------------------------------------------------------------------
+# --build / --build-prod build every service. Otherwise, for an unset or `latest`
+# TAG, a missing image is built locally rather than pulled — only the missing ones
+# — and images already present run as they are. A pinned release tag names a
+# published image: pull it, never build. --no-build overrides all of this.
+build_services=()
 if [ "$BUILD_IMAGE" = true ]; then
-  echo "Building local images (multilevel-video-understanding + videostream-analytics + smart-community-mcp-server)..."
-  $DOCKER_CMD build --no-cache multilevel-video-understanding videostream-analytics smart-community-mcp-server
+  build_services=(multilevel-video-understanding videostream-analytics smart-community-mcp-server)
+elif [ "$UP_CONTAINERS" = true ] && [ "${TAG:-latest}" = "latest" ]; then
+  docker image inspect "$MULTILEVEL_IMAGE" >/dev/null 2>&1 || build_services+=(multilevel-video-understanding)
+  docker image inspect "$VSA_IMAGE" >/dev/null 2>&1 || build_services+=(videostream-analytics)
+  docker image inspect "$MCP_IMAGE" >/dev/null 2>&1 || build_services+=(smart-community-mcp-server)
+fi
+[ "$SKIP_BUILD" = true ] && build_services=()
+
+if [ "${#build_services[@]}" -gt 0 ]; then
+  echo "Building local images: ${build_services[*]}..."
+  build_args=()
+  [ "$BUILD_NO_CACHE" = true ] && build_args+=(--no-cache)
+  $DOCKER_CMD build "${build_args[@]}" "${build_services[@]}"
   echo "==== Build complete! ===="
 fi
 
 # --- up -----------------------------------------------------------------------
 if [ "$UP_CONTAINERS" = true ]; then
-  prepare_videostream_config
+  vsa_prepare
 
   # Compose pulls a missing image itself, and only builds from source if that pull
   # fails — so a missing image is not fatal. But the build fallback is a long, silent

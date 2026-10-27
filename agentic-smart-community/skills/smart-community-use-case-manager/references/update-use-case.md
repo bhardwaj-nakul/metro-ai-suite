@@ -48,8 +48,8 @@ semantics. Event-only changes never restart analytics or alter prefilter.
 
 Read effective monitor status and identify the scope; clarify multiple cameras
 only when unspecified. Extract every explicit supported field: enabled,
-target_classes, min_confidence, min_frames_hit, detect_fps, device, model_path,
-long_side. Normalize explicit 65% confidence to 0.65. Preserve false and zero.
+model (a registry name from prefilter_options, never a path), target_classes,
+min_confidence, min_frames_hit, detect_fps, device, long_side. Normalize explicit 65% confidence to 0.65. Preserve false and zero.
 No dedicated prompt/rule generation or VLM CRUD. Unsupported IoU/NMS fields
 must not be silently mapped or ignored. Consult pipeline-config.md for bounds.
 

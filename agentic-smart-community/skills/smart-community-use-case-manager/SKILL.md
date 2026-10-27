@@ -61,6 +61,12 @@ monitor_defaults first and explicit request values last. Numeric parameters
 alone do not imply enabling prefilter. Existing pipeline-only changes bypass
 M1–M4 and use the delta update flow. Schema approval is never a binding gate.
 
+## Hard boundary — use the tools, never change the platform
+
+Work only through the `smart_community_*` tools. Never edit the platform's source code or build files (the Agentic Smart Community checkout: `packages/`, `videostream-analytics/`, `docker/`, `skills/`, and so on), never build or rebuild images, and never restart or recreate containers or services. This applies even if it looks like the only way past an error.
+
+If a tool call fails and its documented parameters cannot fix it, stop. Report the exact error text, what you already tried, and that the fix needs a change to the platform by the user. Do not read the platform source to work around it, and do not substitute shell commands for the tool.
+
 ## Hard tool-call gates
 
 Quick index of the two irreversible tool calls. Each is forbidden unless every
@@ -78,8 +84,8 @@ See **Question flow**, **Business design approval**, **Register (two steps)**.
 
 - `source_url` is known and the `use_case` is verified to exist (M0);
 - P1 and P2 are explicit in the request or a clarification reply;
-- all required `target_classes` are complete (P1=yes), and P2=yes applies the
-  ROI template defaults from the reference;
+- the prefilter model and all required `target_classes` are complete (P1=yes),
+  and P2=yes applies the ROI template defaults from the reference;
 - the exact final `pipeline_config` was displayed (M3);
 - a still-later user turn said exactly `confirm pipeline_config`;
 - the config passed to the tool is identical to the approved one.
@@ -306,7 +312,8 @@ P2 — ROI focus: crop/focus a region of interest?
 Reply exactly: P1=yes|no, P2=yes|no
 ```
 
-Note that P1=yes later requires picking `target_classes`, and P2=yes applies
+Note that P1=yes later requires picking the prefilter model (when more than one
+is selectable) and its `target_classes`, and P2=yes applies
 the ROI template defaults (`mode: crop, expand: 0.25, auto_split_area: 0.35`;
 see the reference) with no further ROI questions. **End the turn immediately.**
 
@@ -320,10 +327,24 @@ ambiguous, ask only for the missing part and end the turn again.
 
 Continue after explicit decisions in the request or clarification reply.
 
-* **P1=yes** — call `smart_community_monitor_ctl action=prefilter_options`, present
-  the returned `class_names` exactly, and reuse supplied `target_classes` or ask for missing classes. Do not select for the user; a recommendation is never a
-  selection; every pick must match a returned class name; handle `labels_source`
-  per the reference. Continue only after the user's explicit selection.
+* **P1=yes** — call `smart_community_monitor_ctl action=prefilter_options`, then
+  resolve two selections in order (details in the reference):
+  1. **Model.** `models[]` is the selectable set. Reuse a model the user already
+     named in the request or a clarification reply if it is a returned `name`.
+     Otherwise, if `models[]` holds **more than one** entry, list every model
+     by `name` with its `description`, `input_shape` and class count, **end the
+     turn**, and have the user explicitly pick one; the class list below
+     depends on this choice, so do not show classes yet. If exactly one is
+     selectable, use it and state which in the M3 summary. Never offer or
+     accept a model listed only under `rejected`; never put a `model_path` in
+     `pipeline_config` — models are chosen by `name`.
+  2. **Classes.** Present the chosen model's `class_names` exactly, reuse
+     supplied `target_classes`, or ask for the missing classes.
+
+  Do not select for the user on either step; a recommendation is never a
+  selection; the model must be a returned `name` and every class must match
+  that model's `class_names`; handle `labels_source` per the reference.
+  Continue only after the user's explicit selections.
 * **P2=yes** — apply the ROI template defaults from the reference verbatim
   (`roi: { enabled: true, mode: crop, expand: 0.25, auto_split_area: 0.35 }`).
   No further ROI questions; there is no geometry to collect (ROI is
@@ -339,7 +360,8 @@ Continue after explicit decisions in the request or clarification reply.
 Only after all decisions/selections/parameters are complete:
 
 1. Assemble the exact `pipeline_config` for `register_source` and display it in
-   full — no hidden or summarized fields.
+   full — no hidden or summarized fields. When prefilter is enabled it carries
+   `model: <name>` alongside `target_classes`.
 2. Also display the decision summary (template in the reference).
 
 Even when both features are off, display an **explicit** disabled config
@@ -370,7 +392,7 @@ another part of the workflow does not satisfy this gate.
 
 Immediately before the call, verify the conversation contains, in order:
 (1) explicit pipeline decisions in the request or clarification; (2) any required
-`target_classes` selection; (4) the turn displaying the exact
+prefilter model and `target_classes` selection; (4) the turn displaying the exact
 `pipeline_config`; (5) a later explicit approval of that displayed config. If any
 item is absent, return to that state and do not call the tool. The config passed
 must be identical to the approved one — if any field must change, redisplay and
@@ -389,7 +411,7 @@ the approved `pipeline_config`. Never use `<use_case>_monitor` as the ID.
 
 ### Monitor gate failure handling
 
-Missing P1/P2 answer, target-class selection, or final approval:
+Missing P1/P2 answer, prefilter model or target-class selection, or final approval:
 stop and request exactly the missing item (redisplay the config for a missing
 approval). Config changed after approval: void it and repeat M3. Never bypass a
 gate by omitting `pipeline_config`, sending `{}`, relying on server defaults, or

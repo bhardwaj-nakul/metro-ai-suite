@@ -24,12 +24,17 @@ from unittest.mock import patch
 
 import pytest
 
+from shared import model_registry
 from shared.config import (
+    AppConfig,
     DefaultsConfig,
     PrefilterConfig,
+    PrefilterModelConfig,
     SourceConfig,
 )
+from shared.model_registry import ModelNotAvailable
 from sinks import NullSink
+from shared.model_registry import ModelShapeInfo
 from stream_monitor.rtsp_monitor import StreamPipeline
 
 
@@ -279,3 +284,120 @@ class TestPrefilterFromHTTPRegister:
         assert cfg.enabled is True
         assert cfg.model_path == "/models/yolo.xml"
         assert cfg.min_confidence == 0.8
+
+
+class TestPrefilterModelRegistry:
+    """Which model a monitor gets, and which entries are selectable at all.
+
+    A monitor names a model by registry key, so these are the checks standing
+    between `prefilter.model: <something>` and the path that reaches OpenVINO.
+    """
+
+    def _config(self, tmp_path, **entries):
+        config = AppConfig(model_dir="/tmp/models")
+        config.model_dir = str(tmp_path)
+        config.prefilter_models = {
+            name: PrefilterModelConfig(**fields) for name, fields in entries.items()
+        }
+        return config
+
+    def _ir_pair(self, tmp_path, stem):
+        xml = tmp_path / f"{stem}.xml"
+        xml.write_text("<net/>")
+        (tmp_path / f"{stem}.bin").write_bytes(b"\x00")
+        return xml
+
+    def _stub(self, class_names=("person",)):
+        info = ModelShapeInfo(
+            class_names=list(class_names),
+            labels_source="embedded",
+            input_shape="[1,3,640,640]",
+            output_shape=f"[1,{4 + len(class_names)},8400]",
+            is_detection=True,
+        )
+        return patch(
+            "stream_monitor.pipeline.prefilter_yolo.inspect_model", return_value=info
+        )
+
+    def test_key_resolves_to_the_registered_path(self, tmp_path):
+        xml = self._ir_pair(tmp_path, "yolo11n")
+        config = self._config(
+            tmp_path, yolo11n={"kind": "detection", "model_path": str(xml)}
+        )
+        with self._stub():
+            info = model_registry.resolve(config, "yolo11n")
+        assert info.model_path == str(xml)
+        assert info.kind == "detection"
+        assert info.backend == "openvino"
+
+    def test_unregistered_key_is_refused(self, tmp_path):
+        config = self._config(tmp_path)
+        with pytest.raises(ModelNotAvailable):
+            model_registry.resolve(config, "yolo11n")
+
+    def test_registered_but_missing_file_is_not_discoverable(self, tmp_path):
+        config = self._config(
+            tmp_path,
+            ghost={"kind": "detection", "model_path": str(tmp_path / "ghost.xml")},
+        )
+        available, rejected = model_registry.list_models(config)
+        assert available == []
+        assert [r["name"] for r in rejected] == ["ghost"]
+
+    def test_unsupported_kind_is_not_discoverable(self, tmp_path):
+        xml = self._ir_pair(tmp_path, "pose")
+        config = self._config(
+            tmp_path, pose={"kind": "pose", "model_path": str(xml)}
+        )
+        with self._stub():
+            available, rejected = model_registry.list_models(config)
+        assert available == []
+        assert [r["name"] for r in rejected] == ["pose"]
+
+    def test_unsupported_backend_is_not_discoverable(self, tmp_path):
+        xml = self._ir_pair(tmp_path, "trt")
+        config = self._config(
+            tmp_path,
+            trt={"kind": "detection", "backend": "tensorrt", "model_path": str(xml)},
+        )
+        with self._stub():
+            available, rejected = model_registry.list_models(config)
+        assert available == []
+        assert [r["name"] for r in rejected] == ["trt"]
+
+    def test_backend_spelling_is_case_insensitive(self, tmp_path):
+        xml = self._ir_pair(tmp_path, "m1")
+        config = self._config(
+            tmp_path,
+            m1={"kind": "Detection", "backend": "OpenVINO", "model_path": str(xml)},
+        )
+        with self._stub():
+            available, rejected = model_registry.list_models(config)
+        assert rejected == []
+        assert available[0].backend == "openvino"
+
+    def test_source_model_overrides_default_and_keeps_other_fields(self, tmp_path):
+        """Per-camera model swap: only the model changes, tuning is inherited."""
+        defaults = DefaultsConfig(
+            prefilter=PrefilterConfig(
+                enabled=True,
+                model="yolo11s",
+                model_path="/models/yolo11s.xml",
+                target_classes=["person"],
+                detect_fps=2.0,
+                device="NPU",
+            )
+        )
+        source = SourceConfig(
+            source_id="cam_child",
+            source_url="rtsp://x/y",
+            # What service.resolve_prefilter_model writes back after looking the
+            # requested key up in the registry.
+            prefilter=PrefilterConfig(model="yolo11n", model_path="/models/yolo11n.xml"),
+        )
+        pipeline = _make_pipeline(source, defaults)
+        assert pipeline._prefilter_cfg.model == "yolo11n"
+        assert pipeline._prefilter_cfg.model_path == "/models/yolo11n.xml"
+        assert pipeline._prefilter_cfg.target_classes == ["person"]
+        assert pipeline._prefilter_cfg.detect_fps == 2.0
+        assert pipeline._prefilter_cfg.device == "NPU"

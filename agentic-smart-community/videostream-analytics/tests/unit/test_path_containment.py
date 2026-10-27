@@ -120,7 +120,8 @@ class TestSourceManagerDataDir:
 
     def _manager(self, root, extra_roots=None):
         config = AppConfig(
-            data_dir=root, allowed_data_roots=list(extra_roots or [])
+            model_dir="/tmp/models", data_dir=root,
+            allowed_data_roots=list(extra_roots or []),
         )
         mgr = SourceManager.__new__(SourceManager)  # skip the watchdog thread
         mgr.config = config

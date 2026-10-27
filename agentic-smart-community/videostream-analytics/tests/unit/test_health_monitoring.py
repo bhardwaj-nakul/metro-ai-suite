@@ -85,6 +85,7 @@ class TestHealthConfig:
 
     def test_app_config_loads_health_from_yaml(self):
         cfg = AppConfig(
+            model_dir="/tmp/models",
             defaults=DefaultsConfig(
                 health=HealthConfig(max_failures=50, recovery_strategy="pause")
             )

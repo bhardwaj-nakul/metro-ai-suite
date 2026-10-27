@@ -107,7 +107,7 @@ class TestStreamPipelinePauseResume:
 class TestSourceManagerPauseResume:
     @pytest.fixture
     def config(self):
-        return AppConfig()
+        return AppConfig(model_dir="/tmp/models")
 
     @pytest.fixture
     def mock_pipeline_class(self):

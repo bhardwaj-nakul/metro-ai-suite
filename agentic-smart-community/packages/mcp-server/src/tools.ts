@@ -165,22 +165,37 @@ export function registerTools(
 
   // --- smart_community_monitor_ctl ---
   server.registerTool("smart_community_monitor_ctl", {
-    description: "Manage monitor lifecycle: register_source | unregister | start | stop | status | list | prefilter_options | update_pipeline. " +
+    description: "Manage monitor lifecycle: register_source | unregister | start | stop | status | list | prefilter_options | update_pipeline | reload_config | register_prefilter_model. " +
       "For register_source, use_case must be a key in config.yaml's use_case_dict; the tool runs " +
       "smart_community_use_case_validate as a pre-check (rejecting if missing fields or summary service issues). " +
-      "prefilter_options is a read-only query returning the prefilter model's selectable target_classes " +
-      "(class_names + labels_source) so a caller can build pipeline_config.prefilter before register_source.",
+      "prefilter_options is a read-only query listing the prefilter models an operator registered, each with its " +
+      "selectable target_classes (class_names + labels_source), plus `rejected` entries that cannot be used and why. " +
+      "Put a monitor on one by setting pipeline_config.prefilter.model to a listed model name — a raw model_path " +
+      "in the request is rejected, since models are selected from the server-side registry. " +
+      "reload_config hot-swaps the videostream-analytics configuration without a restart (no monitor_id needed); " +
+      "call it after the operator edits the VSA config file, then confirm with prefilter_options. " +
+      "register_prefilter_model registers a model INTO the registry (no monitor_id needed): edits the VSA config " +
+      "file, hot-reloads VSA, and confirms via prefilter_options — status is `selectable`, or `rejected` with the reason. " +
+      "status also returns the monitor's effective pipeline (analyticsPipeline) — the defaults←monitor merge VSA " +
+      "actually runs, e.g. whether a monitor that never configured prefilter is filtering, with which model and classes.",
     inputSchema: {
-      action: z.enum(["start", "stop", "register_source", "unregister", "status", "list", "prefilter_options", "update_pipeline"])
+      action: z.enum(["start", "stop", "register_source", "unregister", "status", "list", "prefilter_options", "update_pipeline", "reload_config", "register_prefilter_model"])
         .describe("Control action"),
       monitor_id: z.string().optional().describe("Monitor ID (required for all except list)"),
       source_url: z.string().optional().describe("Source URL — any protocol videostream-analytics supports (for register_source)"),
       name: z.string().optional().describe("Display name (for register_source)"),
       use_case: z.string().optional().describe("Use case key from config.yaml use_case_dict (required for register_source)"),
-      pipeline_config: z.record(z.unknown()).optional().describe("Pipeline config or update delta. Prefilter supports enabled, target_classes, min_confidence (0..1), min_frames_hit (integer >=1), detect_fps (>0), device, model_path, long_side (integer >=0). Unspecified fields are preserved on updates."),
+      pipeline_config: z.record(z.unknown()).optional().describe("Pipeline config or update delta. Prefilter supports enabled, model (a registry name from prefilter_options — never a path), target_classes, min_confidence (0..1), min_frames_hit (integer >=1), detect_fps (>0), device, long_side (integer >=0). Unspecified fields are preserved on updates."),
       dry_run: z.boolean().optional().describe("Preview update_pipeline without changes"),
       expected_revision: z.string().optional().describe("update_pipeline revision from dry_run"),
       candidate_hash: z.string().optional().describe("update_pipeline candidate from dry_run"),
+      model: z.string().optional().describe(
+        "Prefilter model name: narrows prefilter_options to one model; the registry key for register_prefilter_model"
+      ),
+      model_path: z.string().optional().describe("Absolute path to the model's IR .xml (register_prefilter_model)"),
+      kind: z.string().optional().describe("What the model does (register_prefilter_model, default detection; only detection supported)"),
+      backend: z.string().optional().describe("Runtime executing the model (register_prefilter_model, default openvino; only openvino supported)"),
+      description: z.string().optional().describe("Free text shown when choosing a model (register_prefilter_model)"),
       persist: z.boolean().default(true).describe(
         "Mirror the change back to the monitors.yaml the server was booted from (--monitors), " +
         "comment-preserving (default true): register_source writes the entry (lets a restart " +

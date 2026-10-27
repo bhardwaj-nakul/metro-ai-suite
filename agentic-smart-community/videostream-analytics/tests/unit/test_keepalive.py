@@ -53,7 +53,7 @@ def manager(mock_pipeline_class):
     We stop the daemon immediately so tests can drive `_watchdog_check_once`
     deterministically without races.
     """
-    config = AppConfig()
+    config = AppConfig(model_dir="/tmp/models")
     with patch("source_worker.WebhookSink"):
         mgr = SourceManager(config)
     mgr._watchdog_running = False
@@ -111,7 +111,7 @@ class TestKeepaliveManager:
             )
         )
         with patch("source_worker.WebhookSink"):
-            manager = SourceManager(AppConfig(defaults=defaults))
+            manager = SourceManager(AppConfig(model_dir="/tmp/models", defaults=defaults))
         manager._watchdog_running = False
         try:
             src = SourceConfig(
@@ -219,7 +219,7 @@ class TestWatchdog:
 def app_client(monkeypatch):
     """TestClient with a mocked SourceManager (same pattern as test_app_endpoints)."""
     mgr = MagicMock(spec=SourceManager)
-    app = create_app(AppConfig())
+    app = create_app(AppConfig(model_dir="/tmp/models"))
     with TestClient(app, raise_server_exceptions=False) as tc:
         monkeypatch.setattr(service_module, "_manager", mgr)
         yield tc, mgr

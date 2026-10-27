@@ -10,6 +10,20 @@ TESTS_DIR = Path(__file__).parent
 FIXTURES_DIR = TESTS_DIR / "fixtures"
 
 
+@pytest.fixture(autouse=True)
+def _isolate_model_registry_cache():
+    """Keep the prefilter-model inspection cache from leaking across tests.
+
+    It is keyed on (path, mtime, size), and tmp_path reuse plus a stubbed
+    `inspect_model` can otherwise hand one test the labels another test faked.
+    """
+    from shared import model_registry
+
+    model_registry._cache.clear()
+    yield
+    model_registry._cache.clear()
+
+
 @pytest.fixture(scope="session")
 def test_video_path(tmp_path_factory):
     """Create a short MP4 with deterministic motion for video pipeline tests."""

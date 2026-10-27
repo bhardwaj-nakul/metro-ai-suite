@@ -1,6 +1,6 @@
 # GPU + NPU capable image, multi-stage on Debian (python:3.13-slim, currently
 # trixie). Inference devices CPU / GPU (iGPU) / NPU are all usable; the device is
-# picked in config/config.yaml. Requires compose to pass through /dev/dri (iGPU)
+# picked in the effective config (see config/config.yaml.example). Requires compose to pass through /dev/dri (iGPU)
 # and /dev/accel/accel0 (NPU).
 # NOTE: the NPU/GPU driver debs need glibc >= 2.38, i.e. trixie or newer. If the
 # build fails on libc6 version conflicts, purge stale cached python:3.13-slim
@@ -246,7 +246,9 @@ RUN apt-get purge -y --allow-remove-essential perl-base \
               /usr/local/bin/pip*
 
 # The package itself is installed into the venv site-packages; only the runtime
-# config needs to live in /app (compose bind-mounts over config/config.yaml).
+# config needs to live in /app. Compose bind-mounts your seeded config over
+# config.yaml.example. A host-side config/config.yaml symlink (created by
+# setup_vsa.sh) may be copied along; nothing in-image references it.
 WORKDIR /app
 COPY config/ config/
 
@@ -257,4 +259,4 @@ USER appuser
 EXPOSE 8999
 
 # Use the installed console script (validates the entry point resolves).
-CMD ["videostream-analytics", "serve", "--config", "config/config.yaml"]
+CMD ["videostream-analytics", "serve", "--config", "config/config.yaml.example"]

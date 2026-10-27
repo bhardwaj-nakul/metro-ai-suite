@@ -1,5 +1,5 @@
-PREFILTER_MODEL=${PREFILTER_MODEL:-${HOME}/models/openvino/yolo11s/FP16/yolo11s.xml}
-PREFILTER_BIN="${PREFILTER_MODEL%.xml}.bin"
+IR_XML=${IR_XML:-${HOME}/models/openvino/yolo11s/FP16/yolo11s.xml}
+IR_BIN="${IR_XML%.xml}.bin"
 
 if ! declare -F info >/dev/null; then
     info() { printf '[info] %s\n' "$*"; }
@@ -14,8 +14,8 @@ fi
 
 echo "Build YOLO11s OpenVINO IR for NPU (1280x704 FP16 static)"
 
-if [[ -f "$PREFILTER_MODEL" && -f "$PREFILTER_BIN" ]]; then
-    info "Already present: $PREFILTER_MODEL"
+if [[ -f "$IR_XML" && -f "$IR_BIN" ]]; then
+    info "Already present: $IR_XML"
     return 0 2>/dev/null || exit 0
 fi
 
@@ -93,8 +93,8 @@ step "Converting to FP16 static-shape OpenVINO IR (1280x704)"
 run "$venv_dir/bin/python" "$converter" \
     --weights "$weights" \
     --precision FP16 \
-    --xml-path "$PREFILTER_MODEL" \
-    --bin-path "$PREFILTER_BIN" \
+    --xml-path "$IR_XML" \
+    --bin-path "$IR_BIN" \
     --dynamic False \
     --imgsz 704 1280 \
     || {
@@ -102,12 +102,12 @@ run "$venv_dir/bin/python" "$converter" \
     exit 2
     }
 
-if [[ ! -s "$PREFILTER_MODEL" || ! -s "$PREFILTER_BIN" ]]; then
-    err "Conversion finished but the IR pair is incomplete: $PREFILTER_MODEL"
+if [[ ! -s "$IR_XML" || ! -s "$IR_BIN" ]]; then
+    err "Conversion finished but the IR pair is incomplete: $IR_XML"
     exit 2
 fi
 
 step "Cleaning up throwaway venv"
 run rm -rf "$venv_dir"
 
-ok "Done — IR ready at $PREFILTER_MODEL"
+ok "Done — IR ready at $IR_XML"

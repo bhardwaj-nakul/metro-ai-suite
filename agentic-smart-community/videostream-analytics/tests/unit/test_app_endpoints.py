@@ -20,6 +20,10 @@ def mock_manager():
     mgr = MagicMock(spec=SourceManager)
     mgr.get_sources.return_value = []
     mgr.get_source_status.return_value = None
+    # `update_pipeline` asks which model the source already runs so a partial
+    # update does not reset it to the deployment default. Default to "unknown",
+    # the same answer the real manager gives for a source it has never seen.
+    mgr.get_source_prefilter_model.return_value = ""
     mgr._bundles = {}
     return mgr
 
@@ -32,7 +36,7 @@ def app_and_client(mock_manager, monkeypatch):
     handler creates a real SourceManager on startup. Patching before would
     be overwritten.
     """
-    app = create_app(AppConfig())
+    app = create_app(AppConfig(model_dir="/tmp/models"))
     with TestClient(app, raise_server_exceptions=False) as tc:
         monkeypatch.setattr(service_module, "_manager", mock_manager)
         yield tc, mock_manager
@@ -119,6 +123,32 @@ class TestGetSource:
         assert resp.status_code == 404
 
 
+class TestGetSourcePipeline:
+    def test_pipeline_returns_effective_config(self, client, mock_mgr):
+        mock_mgr.get_source_pipeline.return_value = {
+            "source_id": "cam1",
+            "pipeline": {
+                "prefilter": {
+                    "enabled": True,
+                    "model": "yolo11s",
+                    "target_classes": ["person"],
+                },
+            },
+        }
+        resp = client.get("/sources/cam1/pipeline")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source_id"] == "cam1"
+        assert data["pipeline"]["prefilter"]["model"] == "yolo11s"
+        # The resolved server path never leaves the process.
+        assert "model_path" not in data["pipeline"]["prefilter"]
+
+    def test_pipeline_nonexistent_source_returns_404(self, client, mock_mgr):
+        mock_mgr.get_source_pipeline.return_value = None
+        resp = client.get("/sources/nonexistent/pipeline")
+        assert resp.status_code == 404
+
+
 class TestRegisterSource:
     def test_register_success_nested(self, client, mock_mgr):
         mock_mgr.register_source.return_value = {
@@ -140,10 +170,8 @@ class TestRegisterSource:
     def test_register_accepts_roi_block(self, client, mock_mgr):
         """pipeline.roi top-level block must be accepted.
 
-        No `model_path` here on purpose: this test is about the `roi` block, and
-        a request-supplied model path would drag in the containment check
-        (`TestModelPathContainment`) for no reason. Omitting it makes the
-        prefilter inherit the deployment default, which is what MCP does.
+        No `model` here on purpose: this test is about the `roi` block, so the
+        prefilter inherits the deployment default, which is what MCP does.
         """
         mock_mgr.register_source.return_value = {
             "status": "started",
@@ -310,105 +338,204 @@ class TestResumeSource:
         assert resp.status_code == 404
 
 
+def register_model(
+    client,
+    tmp_path,
+    name="m1",
+    class_names=("person", "knife"),
+    labels_source="embedded",
+    **entry_fields,
+):
+    """Put a usable model in the registry and return its name.
+
+    `app.state.config` IS the object `create_app` closed over, so mutating it
+    here is what the endpoints see. The IR pair is faked on disk and
+    `inspect_model` is stubbed, since the real thing needs OpenVINO and a
+    genuine model file.
+    """
+    from unittest.mock import patch
+
+    from shared.config import PrefilterModelConfig
+    from shared.model_registry import ModelShapeInfo
+
+    model = tmp_path / f"{name}.xml"
+    model.write_text("<net/>")
+    (tmp_path / f"{name}.bin").write_bytes(b"\x00")
+
+    config = client.app.state.config
+    config.model_dir = str(tmp_path.parent)
+    config.prefilter_models[name] = PrefilterModelConfig(
+        kind=entry_fields.pop("kind", "detection"),
+        model_path=str(model),
+        **entry_fields,
+    )
+    info = ModelShapeInfo(
+        class_names=list(class_names),
+        labels_source=labels_source,
+        input_shape="[1,3,640,640]",
+        output_shape=f"[1,{4 + len(class_names)},8400]",
+        is_detection=True,
+    )
+    return name, patch(
+        "stream_monitor.pipeline.prefilter_yolo.inspect_model", return_value=info
+    )
+
+
 class TestPrefilterCapabilities:
-    def test_capabilities_unavailable_without_model(self, client):
-        """Default AppConfig ships an empty prefilter.model_path → unavailable."""
+    def test_capabilities_empty_registry(self, client):
+        """Default AppConfig registers no models → nothing selectable."""
         resp = client.get("/capabilities/prefilter")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["labels_source"] == "unavailable"
-        assert data["class_names"] == []
+        assert data["models"] == []
+        assert data["rejected"] == []
+        assert data["default_model"] == ""
+        assert data["supported_kinds"] == ["detection"]
+        assert data["supported_backends"] == ["openvino"]
         assert data["available_devices"]  # non-empty (at least ["CPU"])
         assert data["defaults"]["min_confidence"] == 0.4
 
-    def test_capabilities_embedded_labels(self, client, monkeypatch, tmp_path):
-        model = tmp_path / "model.xml"
-        model.write_text("<net/>")
-        import stream_monitor.pipeline.prefilter_yolo as pf
+    def test_capabilities_lists_registered_model(self, client, tmp_path):
+        name, stub = register_model(client, tmp_path)
+        client.app.state.config.defaults.prefilter.model = name
+        with stub:
+            resp = client.get("/capabilities/prefilter")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert [m["name"] for m in data["models"]] == [name]
+        assert data["models"][0]["backend"] == "openvino"
+        assert data["models"][0]["class_names"] == ["person", "knife"]
+        assert data["default_model"] == name
 
-        monkeypatch.setattr(pf, "read_model_labels",
-                            lambda p: (["person", "knife"], "embedded"))
-        # The endpoint reads config.defaults.prefilter from the create_app
-        # closure, which is the same object as app.state.config.
-        client.app.state.config.defaults.prefilter.model_path = str(model)
+    def test_capabilities_reports_rejection_reason(self, client, tmp_path):
+        """A registered entry that cannot be used is diagnosable, not selectable."""
+        from shared.config import PrefilterModelConfig
+
+        config = client.app.state.config
+        config.model_dir = str(tmp_path)
+        config.prefilter_models["ghost"] = PrefilterModelConfig(
+            kind="detection", model_path=str(tmp_path / "missing.xml")
+        )
         resp = client.get("/capabilities/prefilter")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["labels_source"] == "embedded"
+        assert data["models"] == []
+        assert data["rejected"][0]["name"] == "ghost"
+        assert "missing.xml" in data["rejected"][0]["reason"]
+
+    def test_capabilities_single_model_query(self, client, tmp_path):
+        name, stub = register_model(client, tmp_path)
+        with stub:
+            resp = client.get(f"/capabilities/prefilter?model={name}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == name
         assert data["class_names"] == ["person", "knife"]
 
+    def test_capabilities_single_model_query_unknown(self, client):
+        resp = client.get("/capabilities/prefilter?model=nope")
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["error"] == "model_not_available"
 
-class TestTargetClassesValidation:
-    def _model(self, client, tmp_path):
-        """Create a model file and make its directory a permitted model root.
 
-        `AppConfig()` ships no `defaults.prefilter.model_path`, so there is no
-        model root at all by default and `validate_model_path` rejects every
-        request-supplied path with 400 (see `TestModelPathContainment`). Same
-        closure-sharing trick as `test_capabilities_embedded_labels`:
-        `app.state.config` IS the object `create_app` closed over.
-        """
-        model = tmp_path / "model.xml"
-        model.write_text("<net/>")
-        client.app.state.config.security.allowed_model_roots.append(str(tmp_path))
-        return str(model)
-
-    def test_register_rejects_unknown_target_class(self, client, mock_mgr, monkeypatch, tmp_path):
-        import stream_monitor.pipeline.prefilter_yolo as pf
-        monkeypatch.setattr(pf, "read_model_labels",
-                            lambda p: (["person", "knife"], "embedded"))
+class TestPrefilterModelSelection:
+    def test_register_rejects_request_model_path(self, client, mock_mgr):
+        """Models come from the registry; a raw path in a request is refused."""
         resp = client.post("/register_source", json={
             "source_id": "cam1",
             "source_url": "rtsp://localhost:8554/live/cam1",
             "pipeline": {
-                "prefilter": {
-                    "enabled": True,
-                    "model_path": self._model(client, tmp_path),
-                    "target_classes": ["person", "helmets"],
-                },
+                "prefilter": {"enabled": True, "model_path": "/etc/passwd"},
             },
         })
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "model_path is not accepted"
+        mock_mgr.register_source.assert_not_called()
+
+    def test_register_rejects_unregistered_model(self, client, mock_mgr):
+        resp = client.post("/register_source", json={
+            "source_id": "cam1",
+            "source_url": "rtsp://localhost:8554/live/cam1",
+            "pipeline": {"prefilter": {"enabled": True, "model": "nope"}},
+        })
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert detail["error"] == "model_not_available"
+        assert detail["model"] == "nope"
+        mock_mgr.register_source.assert_not_called()
+
+    def test_register_resolves_model_to_path(self, client, mock_mgr, tmp_path):
+        """The registry entry's path is what reaches the pipeline."""
+        name, stub = register_model(client, tmp_path)
+        mock_mgr.register_source.return_value = {"status": "started", "source_id": "cam1"}
+        with stub:
+            resp = client.post("/register_source", json={
+                "source_id": "cam1",
+                "source_url": "rtsp://localhost:8554/live/cam1",
+                "pipeline": {"prefilter": {"enabled": True, "model": name}},
+            })
+        assert resp.status_code == 200
+        ((source_arg,), _) = mock_mgr.register_source.call_args
+        assert source_arg.prefilter.model == name
+        assert source_arg.prefilter.model_path == str(tmp_path / f"{name}.xml")
+
+
+class TestTargetClassesValidation:
+    def test_register_rejects_unknown_target_class(self, client, mock_mgr, tmp_path):
+        name, stub = register_model(client, tmp_path)
+        with stub:
+            resp = client.post("/register_source", json={
+                "source_id": "cam1",
+                "source_url": "rtsp://localhost:8554/live/cam1",
+                "pipeline": {
+                    "prefilter": {
+                        "enabled": True,
+                        "model": name,
+                        "target_classes": ["person", "helmets"],
+                    },
+                },
+            })
         assert resp.status_code == 422
         detail = resp.json()["detail"]
         assert detail["error"] == "unknown target_classes"
         assert detail["unknown"] == ["helmets"]
         assert "knife" in detail["class_names"]
 
-    def test_register_accepts_valid_target_class(self, client, mock_mgr, monkeypatch, tmp_path):
-        import stream_monitor.pipeline.prefilter_yolo as pf
-        monkeypatch.setattr(pf, "read_model_labels",
-                            lambda p: (["person", "knife"], "embedded"))
+    def test_register_accepts_valid_target_class(self, client, mock_mgr, tmp_path):
+        name, stub = register_model(client, tmp_path)
         mock_mgr.register_source.return_value = {"status": "started", "source_id": "cam1"}
-        resp = client.post("/register_source", json={
-            "source_id": "cam1",
-            "source_url": "rtsp://localhost:8554/live/cam1",
-            "pipeline": {
-                "prefilter": {
-                    "enabled": True,
-                    "model_path": self._model(client, tmp_path),
-                    "target_classes": ["person", "knife"],
+        with stub:
+            resp = client.post("/register_source", json={
+                "source_id": "cam1",
+                "source_url": "rtsp://localhost:8554/live/cam1",
+                "pipeline": {
+                    "prefilter": {
+                        "enabled": True,
+                        "model": name,
+                        "target_classes": ["person", "knife"],
+                    },
                 },
-            },
-        })
+            })
         assert resp.status_code == 200
 
-    def test_register_skips_validation_when_labels_untrusted(self, client, mock_mgr, monkeypatch, tmp_path):
+    def test_register_skips_validation_when_labels_untrusted(self, client, mock_mgr, tmp_path):
         """A fallback_coco/unavailable label set is a guess — don't hard-fail."""
-        import stream_monitor.pipeline.prefilter_yolo as pf
-        monkeypatch.setattr(pf, "read_model_labels",
-                            lambda p: (["person"], "fallback_coco"))
+        name, stub = register_model(
+            client, tmp_path, class_names=("person",), labels_source="fallback_coco"
+        )
         mock_mgr.register_source.return_value = {"status": "started", "source_id": "cam1"}
-        resp = client.post("/register_source", json={
-            "source_id": "cam1",
-            "source_url": "rtsp://localhost:8554/live/cam1",
-            "pipeline": {
-                "prefilter": {
-                    "enabled": True,
-                    "model_path": self._model(client, tmp_path),
-                    "target_classes": ["anything_goes"],
+        with stub:
+            resp = client.post("/register_source", json={
+                "source_id": "cam1",
+                "source_url": "rtsp://localhost:8554/live/cam1",
+                "pipeline": {
+                    "prefilter": {
+                        "enabled": True,
+                        "model": name,
+                        "target_classes": ["anything_goes"],
+                    },
                 },
-            },
-        })
+            })
         assert resp.status_code == 200
 
 
@@ -677,7 +804,7 @@ class TestSourceUrlSchemeAllowlist:
         from service import create_app
         from shared.config import AppConfig
 
-        config = AppConfig()
+        config = AppConfig(model_dir="/tmp/models")
         config.security.allow_file_source = True
         app = create_app(config)
         with TestClient(app, raise_server_exceptions=False) as tc:
@@ -712,239 +839,38 @@ class TestConcurrentRegistration:
         assert resp.json()["detail"]["error"] == "registration_in_progress"
 
 
-class TestModelPathContainment:
-    """A request-supplied `model_path` must resolve under a permitted root.
-
-    The value reaches `openvino.Core().read_model()` twice — once in
-    `_validate_target_classes` via `Path(...).exists()` + `read_model_labels`,
-    and again in `rtsp_monitor._init_prefilter` on the running pipeline — and
-    the API has no authentication. Unconfined, it is a file-existence oracle
-    plus a way to have arbitrary server files parsed as an IR model
-    (CodeQL `py/path-injection`).
-
-    Permitted roots are the directory of `defaults.prefilter.model_path` plus
-    `security.allowed_model_roots`. `AppConfig()` sets neither, so the default
-    posture is "reject every request-supplied model_path".
-    """
-
-    def _register(self, client, model_path):
-        return client.post(
-            "/register_source",
-            json={
-                "source_id": "cam1",
-                "source_url": "rtsp://localhost:8554/live/x",
-                "pipeline": {
-                    "prefilter": {
-                        "enabled": True,
-                        "model_path": model_path,
-                        "target_classes": ["person"],
-                    },
-                },
-            },
-        )
-
-    def _update(self, client, model_path):
-        return client.put(
-            "/sources/cam1/pipeline",
-            json={
-                "pipeline": {
-                    "prefilter": {
-                        "enabled": True,
-                        "model_path": model_path,
-                        "target_classes": ["person"],
-                    },
-                },
-            },
-        )
-
-    @staticmethod
-    def _permit(client, root):
-        client.app.state.config.security.allowed_model_roots.append(str(root))
-
-    def test_no_root_configured_rejects_any_model_path(self, client, mock_mgr):
-        """Default posture: nothing configured -> nothing accepted."""
-        resp = self._register(client, "/etc/shadow")
-        assert resp.status_code == 400
-        assert resp.json()["detail"]["error"] == "invalid_request"
-
-    def test_path_inside_root_is_accepted(self, client, mock_mgr, tmp_path):
-        """Inside a permitted root the request goes through.
-
-        The file need not exist: containment is a path check, not an existence
-        check, and `_validate_target_classes` already treats a missing model as
-        "labels unavailable" and skips.
-        """
-        mock_mgr.register_source.return_value = {"status": "started", "source_id": "cam1"}
-        self._permit(client, tmp_path)
-        resp = self._register(client, str(tmp_path / "sub" / "model.xml"))
-        assert resp.status_code == 200
-
-    def test_path_outside_root_is_rejected(self, client, mock_mgr, tmp_path):
-        self._permit(client, tmp_path / "allowed")
-        resp = self._register(client, str(tmp_path / "elsewhere" / "model.xml"))
-        assert resp.status_code == 400
-
-    def test_traversal_out_of_root_is_rejected(self, client, mock_mgr, tmp_path):
-        """`..` must not walk out — normalization happens before the check."""
-        self._permit(client, tmp_path / "allowed")
-        resp = self._register(
-            client, str(tmp_path / "allowed" / ".." / "etc" / "model.xml")
-        )
-        assert resp.status_code == 400
-
-    def test_sibling_prefix_is_not_contained(self, client, mock_mgr, tmp_path):
-        """`<root>-evil/x` shares a string prefix with `<root>` but is outside.
-
-        This is why containment appends `os.sep` before comparing.
-        """
-        root = tmp_path / "models"
-        root.mkdir()
-        (tmp_path / "models-evil").mkdir()
-        self._permit(client, root)
-        resp = self._register(client, str(tmp_path / "models-evil" / "model.xml"))
-        assert resp.status_code == 400
-
-    def test_symlink_escape_is_rejected(self, client, mock_mgr, tmp_path):
-        """A symlink inside the root pointing out of it must not smuggle access."""
-        root = tmp_path / "models"
-        root.mkdir()
-        outside = tmp_path / "secrets"
-        outside.mkdir()
-        (outside / "model.xml").write_text("<net/>")
-        (root / "link").symlink_to(outside)
-        self._permit(client, root)
-        resp = self._register(client, str(root / "link" / "model.xml"))
-        assert resp.status_code == 400
-
-    def test_resolved_path_is_substituted(self, client, mock_mgr, tmp_path):
-        """The SourceConfig must carry the RESOLVED path, not the raw request.
-
-        Substitution is what keeps the running pipeline
-        (`rtsp_monitor._init_prefilter`) from loading an unnormalized path, and
-        it is what puts the containment check on the data flow that reaches the
-        sink — a validate-and-discard helper would satisfy neither.
-        """
-        mock_mgr.register_source.return_value = {"status": "started", "source_id": "cam1"}
-        root = tmp_path / "models"
-        root.mkdir()
-        self._permit(client, root)
-        resp = self._register(client, str(root / "." / "model.xml"))
-        assert resp.status_code == 200
-        ((source_arg,), _) = mock_mgr.register_source.call_args
-        assert source_arg.prefilter.model_path == str(
-            (root / "model.xml").resolve()
-        )
-
-    def test_absent_model_path_inherits_trusted_default(self, client, mock_mgr, tmp_path):
-        """Omitting model_path must NOT be blocked by containment.
-
-        This is the MCP path — it never sends `model_path`, so every real
-        request inherits `defaults.prefilter.model_path`, which is trusted
-        config and deliberately not re-checked.
-        """
-        mock_mgr.register_source.return_value = {"status": "started", "source_id": "cam1"}
-        client.app.state.config.defaults.prefilter.model_path = str(
-            tmp_path / "deployment" / "model.xml"
-        )
-        resp = client.post(
-            "/register_source",
-            json={
-                "source_id": "cam1",
-                "source_url": "rtsp://localhost:8554/live/x",
-                "pipeline": {"prefilter": {"enabled": True, "target_classes": ["person"]}},
-            },
-        )
-        assert resp.status_code == 200
-
-    def test_deployment_model_directory_is_a_root(self, client, mock_mgr, tmp_path):
-        """A sibling of the deployment model is accepted with no extra config.
-
-        `_model_roots` derives the root from `defaults.prefilter.model_path`, so
-        the standard deployment can switch models within its own model dir
-        without anyone setting `allowed_model_roots`.
-        """
-        mock_mgr.register_source.return_value = {"status": "started", "source_id": "cam1"}
-        model_dir = tmp_path / "openvino" / "yolo11s" / "FP16"
-        model_dir.mkdir(parents=True)
-        client.app.state.config.defaults.prefilter.model_path = str(
-            model_dir / "yolo11s.xml"
-        )
-        resp = self._register(client, str(model_dir / "yolo11m.xml"))
-        assert resp.status_code == 200
-
-    def test_overlong_model_path_does_not_500(self, client, mock_mgr):
-        """Regression: a fuzzed over-long model_path must not reach `Path.exists()`.
-
-        History: `Path.exists()` only swallows ENOENT/ENOTDIR/ELOOP, so a
-        model_path longer than NAME_MAX raised ENAMETOOLONG and escaped
-        `_validate_target_classes` as a bare 500 (InvalidValueChecker_500 on
-        both register_source and PUT /pipeline). That was first fixed by
-        treating an un-stat-able path as missing; containment now rejects it
-        earlier and for a better reason — it is not under a permitted root —
-        so the response is a deliberate 400. What must never come back is 500.
-        """
-        resp = self._register(client, "z" * 2000)
-        assert resp.status_code == 400
-
-    def test_overlong_model_path_on_update_pipeline(self, client, mock_mgr):
-        resp = self._update(client, "z" * 2000)
-        assert resp.status_code == 400
-
-    def test_relative_model_path_is_rejected(self, client, mock_mgr, tmp_path):
-        self._permit(client, tmp_path)
-        resp = self._register(client, "models/model.xml")
-        assert resp.status_code == 400
-
-
-class TestConfiguredModelPathStatFailure:
-    """The OSError-from-`exists()` fallback now only guards the TRUSTED path.
-
-    Request-supplied paths are rejected by `validate_model_path` before they
-    reach `Path(...).exists()` (see `TestModelPathContainment`), but
-    `defaults.prefilter.model_path` is not containment-checked, so a mistyped
-    config.yaml can still land in that `except OSError` branch. It must degrade
-    to "labels unavailable, skip the check" rather than crash.
-    """
-
-    def test_exists_oserror_on_configured_default_is_treated_as_missing(
-        self, client, mock_mgr, monkeypatch
-    ):
-        from pathlib import Path as _P
-
-        monkeypatch.setattr(
-            _P, "exists", lambda self: (_ for _ in ()).throw(OSError("boom"))
-        )
-        mock_mgr.register_source.return_value = {"status": "started", "source_id": "cam1"}
-        client.app.state.config.defaults.prefilter.model_path = "/some/model.xml"
-        resp = client.post(
-            "/register_source",
-            json={
-                "source_id": "cam1",
-                "source_url": "rtsp://localhost:8554/live/x",
-                "pipeline": {"prefilter": {"enabled": True, "target_classes": ["person"]}},
-            },
-        )
-        assert resp.status_code == 200
-
-
 class TestPrefilterUpdateValidation:
-    def test_preview_validates_merged_classes_without_updating(self, client, mock_mgr, monkeypatch, tmp_path):
-        import stream_monitor.pipeline.prefilter_yolo as pf
-        model = tmp_path / "model.xml"
-        model.write_text("model")
-        client.app.state.config.defaults.prefilter.model_path = str(model)
-        monkeypatch.setattr(pf, "read_model_labels", lambda _: (["cat", "dog"], "embedded"))
+    """`POST /pipeline/validate` and `PUT /pipeline` check the *effective* prefilter.
+
+    The effective config is the deployment defaults, then the source's current
+    values, then the request — so a partial patch is validated against the
+    model the source is actually on.
+    """
+
+    def test_preview_validates_merged_classes_without_updating(self, client, mock_mgr, tmp_path):
+        name, stub = register_model(client, tmp_path, class_names=("cat", "dog"))
         mock_mgr.get_source_status.return_value = {
-            "pipeline_config": {"prefilter": {"enabled": True, "model_path": str(model), "target_classes": ["cat"], "min_confidence": .4}}
+            "pipeline_config": {"prefilter": {
+                "enabled": True, "model": name, "target_classes": ["cat"], "min_confidence": .4,
+            }}
         }
-        resp = client.post("/sources/cam1/pipeline/validate", json={"pipeline": {"prefilter": {"target_classes": ["unknown"]}}})
-        assert resp.status_code == 422
-        mock_mgr.update_pipeline_config.assert_not_called()
-        resp = client.post("/sources/cam1/pipeline/validate", json={"pipeline": {"prefilter": {"min_frames_hit": 3, "detect_fps": 4, "long_side": 0}}})
+        with stub:
+            resp = client.post(
+                "/sources/cam1/pipeline/validate",
+                json={"pipeline": {"prefilter": {"target_classes": ["unknown"]}}},
+            )
+            assert resp.status_code == 422
+            mock_mgr.update_pipeline_config.assert_not_called()
+            resp = client.post(
+                "/sources/cam1/pipeline/validate",
+                json={"pipeline": {"prefilter": {"min_frames_hit": 3, "detect_fps": 4, "long_side": 0}}},
+            )
         assert resp.status_code == 200
-        assert resp.json()["prefilter"]["enabled"] is True
-        assert resp.json()["prefilter"]["target_classes"] == ["cat"]
-        assert resp.json()["prefilter"]["min_frames_hit"] == 3
+        body = resp.json()["prefilter"]
+        assert body["enabled"] is True
+        assert body["model"] == name
+        assert body["target_classes"] == ["cat"]
+        assert body["min_frames_hit"] == 3
         mock_mgr.update_pipeline_config.assert_not_called()
 
     @pytest.mark.parametrize("patch", [{"nms_iou": .5}, {"min_frames_hit": 0}, {"detect_fps": 0}, {"long_side": -1}])
@@ -953,12 +879,59 @@ class TestPrefilterUpdateValidation:
         assert resp.status_code == 422
         mock_mgr.update_pipeline_config.assert_not_called()
 
-    def test_commit_validates_partial_classes_against_current_model(self, client, mock_mgr, monkeypatch, tmp_path):
-        import stream_monitor.pipeline.prefilter_yolo as pf
-        model = tmp_path / "custom.xml"
-        model.write_text("model")
-        monkeypatch.setattr(pf, "read_model_labels", lambda _: (["cat"], "embedded"))
-        mock_mgr.get_source_status.return_value = {"pipeline_config": {"prefilter": {"enabled": True, "model_path": str(model), "target_classes": ["cat"]}}}
-        resp = client.put("/sources/cam1/pipeline", json={"pipeline": {"prefilter": {"target_classes": ["person"]}}})
+    def test_commit_validates_partial_classes_against_current_model(self, client, mock_mgr, tmp_path):
+        name, stub = register_model(client, tmp_path, name="custom", class_names=("cat",))
+        mock_mgr.get_source_status.return_value = {
+            "pipeline_config": {"prefilter": {"enabled": True, "model": name, "target_classes": ["cat"]}}
+        }
+        with stub:
+            resp = client.put(
+                "/sources/cam1/pipeline",
+                json={"pipeline": {"prefilter": {"target_classes": ["person"]}}},
+            )
         assert resp.status_code == 422
         mock_mgr.update_pipeline_config.assert_not_called()
+
+    def test_request_model_path_is_rejected_by_validate(self, client, mock_mgr):
+        mock_mgr.get_source_status.return_value = {"pipeline_config": {}}
+        resp = client.post(
+            "/sources/cam1/pipeline/validate",
+            json={"pipeline": {"prefilter": {"model_path": "/etc/passwd"}}},
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "model_path is not accepted"
+
+    def test_disabling_prefilter_never_needs_a_usable_model(self, client, mock_mgr):
+        """Turning prefilter off must work even when its model is unavailable."""
+        mock_mgr.get_source_status.return_value = {
+            "pipeline_config": {"prefilter": {"enabled": True, "model": "gone"}}
+        }
+        resp = client.post(
+            "/sources/cam1/pipeline/validate",
+            json={"pipeline": {"prefilter": {"enabled": False}}},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["prefilter"]["enabled"] is False
+
+    def test_validate_switches_to_a_registered_model_and_reports_its_path(self, client, mock_mgr, tmp_path):
+        name, stub = register_model(client, tmp_path, name="other", class_names=("person",))
+        mock_mgr.get_source_status.return_value = {
+            "pipeline_config": {"prefilter": {"enabled": True, "model": "yolo11s", "target_classes": ["person"]}}
+        }
+        with stub:
+            resp = client.post(
+                "/sources/cam1/pipeline/validate",
+                json={"pipeline": {"prefilter": {"model": name}}},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["prefilter"]["model"] == name
+        assert resp.json()["prefilter"]["model_path"] == str(tmp_path / f"{name}.xml")
+
+    def test_roi_requires_prefilter(self, client, mock_mgr):
+        mock_mgr.get_source_status.return_value = {"pipeline_config": {"prefilter": {"enabled": False}}}
+        resp = client.post(
+            "/sources/cam1/pipeline/validate",
+            json={"pipeline": {"roi": {"enabled": True}}},
+        )
+        assert resp.status_code == 422
+

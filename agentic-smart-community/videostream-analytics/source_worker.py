@@ -116,6 +116,16 @@ class SourceManager:
         )
         self._watchdog_thread.start()
 
+    def on_config_reloaded(self) -> None:
+        """Pick up what a config swap cannot reach by object identity alone.
+
+        `self.config` IS the swapped object, so roots/defaults are already
+        current; only the eagerly-built default webhook sink holds stale
+        values and is rebuilt. Sources already running keep the webhook URL
+        they were registered with.
+        """
+        self._default_sink = WebhookSink(self.config.webhook)
+
     def _data_roots(self) -> list[str]:
         return [
             expand_path(self.config.data_dir),
@@ -454,6 +464,67 @@ class SourceManager:
             return None
         return self._describe_bundle(source_id, bundle)
 
+    def get_source_prefilter_model(self, source_id: str) -> str:
+        """Registry key the source is currently running, ``""`` if unknown.
+
+        `update_pipeline` needs this: a PUT that changes only, say,
+        `min_confidence` must keep the source on its own model rather than
+        silently inherit the deployment default, because the override is merged
+        onto the source's *effective* prefilter config.
+        """
+        with self._registry_lock:
+            bundle = self._bundles.get(source_id)
+        if bundle is None:
+            return ""
+        prefilter = bundle.pipeline.source.prefilter
+        return prefilter.model if prefilter else ""
+
+    def get_source_pipeline(self, source_id: str) -> dict[str, Any] | None:
+        """The source's effective pipeline, for "what is this monitor actually
+        running" questions (e.g. an agent asked whether a monitor that never
+        configured `prefilter` is filtering).
+
+        StreamPipeline writes the defaults←source merge back onto `source` at
+        construction, so the blocks are already effective; keepalive lives on
+        the bundle. `prefilter.model_path` is stripped: it is a resolved server
+        path, and /capabilities/prefilter already publishes it per model.
+        """
+        with self._registry_lock:
+            bundle = self._bundles.get(source_id)
+        if bundle is None:
+            return None
+        source = bundle.pipeline.source
+        pipeline = {
+            name: (cfg.model_dump() if cfg is not None else None)
+            for name in ("motion", "segment", "static", "recording",
+                         "prefilter", "roi", "health")
+            for cfg in [getattr(source, name)]
+        }
+        if pipeline["prefilter"] is not None:
+            pipeline["prefilter"].pop("model_path", None)
+        pipeline["keepalive"] = (
+            bundle.keepalive.model_dump() if bundle.keepalive is not None else None
+        )
+        return {"source_id": source_id, "pipeline": pipeline}
+
+    @staticmethod
+    def _published_pipeline_config(source: SourceConfig) -> dict[str, Any]:
+        """The blocks a client may read back and send again.
+
+        `prefilter.model_path` is withheld: it is the path VSA resolved from the
+        model name, which a request is never allowed to carry. Publishing it made
+        every read-modify-write client (merge a patch into the running config,
+        send the result back) trip over its own copy of the field.
+        """
+        published = {
+            key: getattr(source, key).model_dump()
+            for key in ("motion", "segment", "static", "prefilter", "roi", "recording", "health")
+            if getattr(source, key, None) is not None
+        }
+        if "prefilter" in published:
+            published["prefilter"].pop("model_path", None)
+        return published
+
     def _describe_bundle(self, source_id: str, bundle: SourceBundle) -> dict[str, Any]:
         pipe = bundle.pipeline
         ts = bundle.last_keepalive_at
@@ -468,11 +539,7 @@ class SourceManager:
             "data_dir": bundle.data_dir,
             "status": pipe.status,
             "running": pipe.is_running,
-            "pipeline_config": {
-                key: getattr(pipe.source, key).model_dump()
-                for key in ("motion", "segment", "static", "prefilter", "roi", "recording", "health")
-                if getattr(pipe.source, key, None) is not None
-            },
+            "pipeline_config": self._published_pipeline_config(pipe.source),
             "prefilter_status": pipe.prefilter_status,
             "recording_enabled": bundle.recorder is not None,
             "health": pipe.health_info,

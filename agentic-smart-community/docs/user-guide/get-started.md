@@ -82,7 +82,7 @@ source docker/set_env.sh
 bash setup_docker.sh
 ```
 
-`setup_docker.sh` pulls every image it needs, so there is nothing to build or download beforehand. To build the service images from source instead, see [Build the service images from source](#build-the-service-images-from-source).
+With `TAG` unset or `latest`, `setup_docker.sh` builds a service image from the working tree when it is not present locally, and runs the images already present as they are. With a pinned release tag such as `TAG=2026.2.0` it pulls the published images and builds nothing. Add `--no-build` to never build; see [Build the service images from source](#build-the-service-images-from-source).
 
 **Reuse an existing model serving:** Replace only this Step 1 startup procedure as described in [Use an existing model serving](#use-an-existing-model-serving). After the application tier starts, continue with [Step 2 - Verify the MCP server](#step-2---verify-the-mcp-server) and the remaining steps.
 
@@ -240,7 +240,25 @@ Leave the monitor online long enough to process video and store events in `~/.mc
 "Generate today's report for the cam_test monitor."
 ```
 
-**D. Delete a monitor**:
+**D. Switch a monitor's prefilter model**:
+
+Ask which prefilter models are available. 
+
+```text
+"How many prefilter models are available now?"
+```
+> The agent lists the models registered under `prefilter_models` in `${VIDEOSTREAM_CACHE_HOST}/config.yaml` (default `~/.cache/.videostream-analytics/config.yaml`)
+
+To use your own OpenVINO™ model, place its `.xml` and `.bin` under `PREFILTER_MODEL_DIR` (default `~/models/openvino/`), then ask the agent to register it and switch a monitor to it:
+
+```text
+"I have an OpenVINO model at /path/to/your/model.xml. Register it, and update the pipeline of cam_test to use this model."
+```
+
+> [!NOTE]
+> Fore more details, please see [Configure the Prefilter Model for a Monitor](./how-to-guides/configure-prefilter-model.md).
+
+**E. Delete a monitor**:
 
 Ask the agent to delete the monitor registered in the previous step:
 
@@ -287,13 +305,15 @@ Furthermore, you can simply describe your requirements to an agent to create a c
 
 ## Build the service images from source
 
-This is optional. By default `setup_docker.sh` pulls the prebuilt images from Docker Hub — [intel/multilevel-video-understanding](https://hub.docker.com/r/intel/multilevel-video-understanding), [intel/smart-community-mcp-server](https://hub.docker.com/r/intel/smart-community-mcp-server), and [intel/videostream-analytics](https://hub.docker.com/r/intel/videostream-analytics) — and `vllm-ipex-serving` runs from the upstream `intel/llm-scaler-vllm` image. Build locally only when you have modified the sources or need an image for a tag that is not published.
+When `TAG` is unset or `latest`, `setup_docker.sh` builds any of these images that is missing locally, using the Docker layer cache, and runs the ones already present. With a pinned `TAG`, or with `--no-build`, it uses the prebuilt images from Docker Hub instead — [intel/multilevel-video-understanding](https://hub.docker.com/r/intel/multilevel-video-understanding), [intel/smart-community-mcp-server](https://hub.docker.com/r/intel/smart-community-mcp-server), and [intel/videostream-analytics](https://hub.docker.com/r/intel/videostream-analytics) — and `vllm-ipex-serving` runs from the upstream `intel/llm-scaler-vllm` image. An existing local image is not rebuilt automatically, and the images bake in the service code while the configuration is regenerated on every deploy: after you change the service code, run `--build` (or `--build-prod`) to refresh them, or a stale image paired with fresh configuration can fail at startup. Every build uses the Docker layer cache, so an unchanged tree is quick; add `--no-cache` for a clean rebuild.
 
 ```bash
 source docker/set_env.sh
 
 bash setup_docker.sh --build        # build the three images, do not start
 bash setup_docker.sh --build-prod   # build, then start the full stack
+bash setup_docker.sh --build --no-cache   # clean rebuild, ignoring the layer cache
+bash setup_docker.sh --light --no-build   # never build, even for TAG=latest; use images already present or pulled
 ```
 
 Building takes considerably longer than pulling. `setup_docker.sh` clones the `multilevel-video-understanding` build context from `edge-ai-libraries` on demand into `.external/edge-ai-libraries`; delete that directory to refresh it.

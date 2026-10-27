@@ -10,7 +10,7 @@ from source_worker import SourceManager
 
 @pytest.fixture
 def config():
-    return AppConfig()
+    return AppConfig(model_dir="/tmp/models")
 
 
 @pytest.fixture
@@ -314,3 +314,87 @@ class TestSourceManagerRestart:
 
     def test_restart_not_found(self, manager):
         assert manager.restart_source("nope")["status"] == "not_found"
+
+
+class TestGetSourcePipeline:
+    def test_returns_effective_blocks_and_strips_model_path(
+        self, manager, mock_pipeline_class
+    ):
+        from shared.config import MotionConfig, PrefilterConfig
+
+        _, instance = mock_pipeline_class
+        # Simulate the post-merge state: StreamPipeline writes the
+        # defaults←source merge back onto `source` at construction; the mock
+        # skips that, so set the effective blocks directly.
+        source = SourceConfig(
+            source_id="cam1",
+            source_url="rtsp://localhost:8554/live/cam1",
+            recording={"enabled": False},
+        )
+        source.prefilter = PrefilterConfig(
+            enabled=True, model="yolo11s", model_path="/server/models/yolo11s.xml"
+        )
+        source.motion = MotionConfig(diff_threshold=9)
+        instance.source = source
+
+        manager.register_source(source)
+        out = manager.get_source_pipeline("cam1")
+
+        assert out["source_id"] == "cam1"
+        assert out["pipeline"]["prefilter"]["enabled"] is True
+        assert out["pipeline"]["prefilter"]["model"] == "yolo11s"
+        # Resolved server path is stripped — /capabilities/prefilter has it.
+        assert "model_path" not in out["pipeline"]["prefilter"]
+        assert out["pipeline"]["motion"]["diff_threshold"] == 9
+        assert out["pipeline"]["keepalive"] is not None
+
+    def test_unknown_source_returns_none(self, manager):
+        assert manager.get_source_pipeline("nope") is None
+
+
+class TestStatusPipelineConfig:
+    """`GET /sources/{id}` publishes `pipeline_config` for read-modify-write clients.
+
+    A client merges its patch into this and sends the result back. The resolved
+    `prefilter.model_path` must not be in it: a request is never allowed to carry
+    that field, so publishing it made every such client reject its own payload
+    (switching a monitor's prefilter model always failed).
+    """
+
+    def _register(self, manager, mock_pipeline_class, **blocks):
+        from shared.config import PrefilterConfig
+
+        _, instance = mock_pipeline_class
+        source = SourceConfig(
+            source_id="cam1",
+            source_url="rtsp://localhost:8554/live/cam1",
+            recording={"enabled": False},
+        )
+        source.prefilter = PrefilterConfig(
+            enabled=True,
+            model="yolo11s",
+            model_path="/server/models/yolo11s.xml",
+            target_classes=["person"],
+        )
+        instance.source = source
+        manager.register_source(source)
+
+    def test_status_pipeline_config_omits_the_resolved_model_path(
+        self, manager, mock_pipeline_class
+    ):
+        self._register(manager, mock_pipeline_class)
+        prefilter = manager.get_source_status("cam1")["pipeline_config"]["prefilter"]
+        assert "model_path" not in prefilter
+        assert prefilter["model"] == "yolo11s"
+        assert prefilter["target_classes"] == ["person"]
+
+    def test_status_pipeline_config_round_trips_into_a_request(
+        self, manager, mock_pipeline_class
+    ):
+        """What the status publishes must be acceptable as a request body."""
+        from service import UpdatePipelineRequest
+
+        self._register(manager, mock_pipeline_class)
+        published = manager.get_source_status("cam1")["pipeline_config"]
+        req = UpdatePipelineRequest(pipeline={"prefilter": published["prefilter"]})
+        assert "model_path" not in req.pipeline.prefilter.model_fields_set

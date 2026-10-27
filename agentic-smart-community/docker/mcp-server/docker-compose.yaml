@@ -50,6 +50,9 @@ services:
       DEFAULT_MAX_TOKENS: ${DEFAULT_MAX_TOKENS:-}
       # Timezone for the container
       TZ: ${TZ:-Asia/Shanghai}
+      # VSA's live configuration file — monitor_ctl register_prefilter_model
+      # edits it in place, then asks VSA to hot-reload.
+      VIDEOSTREAM_CONFIG_FILE: ${VIDEOSTREAM_CONFIG_FILE:-${VIDEOSTREAM_CACHE_HOST:-${HOME}/.cache/.videostream-analytics}/config.yaml}
     volumes:
       # Identity bind mount (host X -> container X): the MCP server sees the data
       # root at the SAME absolute path as the host, so DB clip paths and the paths
@@ -60,6 +63,9 @@ services:
       # 'localtime' modifier — and Node resolve to the host's zone. Only
       # /etc/localtime is read for time conversion; matches videostream-analytics.
       - /etc/localtime:/etc/localtime:ro
+      # VSA live configuration (read-write, in-place edits only — see the env
+      # note above). Exists because setup_docker.sh seeds it before `up`.
+      - ${VIDEOSTREAM_CONFIG_FILE:-${VIDEOSTREAM_CACHE_HOST:-${HOME}/.cache/.videostream-analytics}/config.yaml}:${VIDEOSTREAM_CONFIG_FILE:-${VIDEOSTREAM_CACHE_HOST:-${HOME}/.cache/.videostream-analytics}/config.yaml}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3101/health"]

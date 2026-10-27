@@ -17,6 +17,12 @@ description: >-
 Every tool is keyed on **`monitor_id`** (the camera id, e.g. `cam_child`). There is no
 global `source_id`; ids are per-monitor and never assume they are unique across use cases.
 
+## Hard boundary — use the tools, never change the platform
+
+Work only through the `smart_community_*` tools. Never edit the platform's source code or build files (the Agentic Smart Community checkout: `packages/`, `videostream-analytics/`, `docker/`, `skills/`, and so on), never build or rebuild images, and never restart or recreate containers or services. This applies even if it looks like the only way past an error.
+
+If a tool call fails and its documented parameters cannot fix it, stop. Report the exact error text, what you already tried, and that the fix needs a change to the platform by the user. Do not read the platform source to work around it, and do not substitute shell commands for the tool.
+
 ## Mandatory handoff for new use cases
 
 If the user asks to create/register a new use case, do not draft a prompt and do not call

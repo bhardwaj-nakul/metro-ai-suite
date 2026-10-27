@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Literal, Optional, TypeVar
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+logger = logging.getLogger(__name__)
 
 
 ConfigModelT = TypeVar("ConfigModelT", bound=BaseModel)
@@ -112,10 +116,61 @@ class RoiConfig(BaseModel):
     auto_split_area: float = Field(default=0.0, ge=0.0, le=1.0)  # 0 disables early-split
 
 
+# Model taxonomy. Both tuples are the single place a future tier is added:
+# `kind` is what the model *does*, `backend` is what runs it. Phase 1 ships one
+# of each, but the registry schema is already shaped for more, so adding e.g.
+# classification or a non-OpenVINO runtime needs no config migration.
+SUPPORTED_MODEL_KINDS = ("detection",)
+SUPPORTED_MODEL_BACKENDS = ("openvino",)
+
+# The model root when PREFILTER_MODEL_DIR is unset (and the config file carries
+# no model_dir of its own, which the shipped config does not).
+# Matches the deployment default exported by docker/set_env.sh.
+DEFAULT_MODEL_DIR = "~/models/openvino"
+
+
+class PrefilterModelConfig(BaseModel):
+    """One entry of the `prefilter_models` registry in config.yaml.
+
+    The registry is the ONLY way a model becomes selectable. Requests and
+    `monitors.yaml` name an entry by its key (`prefilter.model`); a raw
+    `model_path` from a request is rejected. Every path on the flow into
+    `read_model()` is therefore deployment-authored, so an unauthenticated
+    caller cannot aim it at an arbitrary file.
+
+    `kind` and `backend` are validated against the SUPPORTED_* tuples above.
+    An entry naming an unsupported value is not an error at load time — it is
+    reported as unavailable by `/capabilities/prefilter`, so a config written
+    for a newer build degrades to "that one model is not selectable here"
+    rather than taking the whole service down.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    # Case-insensitive on input: users write OpenVINO / OPENVINO / openvino and
+    # mean the same runtime. Normalized here so every comparison downstream is
+    # a plain `in SUPPORTED_MODEL_BACKENDS`.
+    backend: str = "openvino"
+    model_path: str
+    description: str = ""
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "PrefilterModelConfig":
+        self.kind = self.kind.strip().lower()
+        self.backend = self.backend.strip().lower()
+        return self
+
+
 class PrefilterConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     enabled: bool = False
+    # Registry key (`prefilter_models.<name>` in config.yaml). This is what a
+    # register_source / update_pipeline request and monitors.yaml supply.
+    model: str = ""
+    # Resolved from `model` server-side — NOT a request input. A request that
+    # sets it explicitly is rejected with 422; see service.resolve_prefilter_model.
     model_path: str = ""
     target_classes: list[str] = Field(default_factory=lambda: ["person"])
     min_confidence: float = Field(default=0.4, ge=0.0, le=1.0)
@@ -149,7 +204,7 @@ class KeepaliveConfig(BaseModel):
 
 
 class SecurityConfig(BaseModel):
-    """Input-surface restrictions for request-supplied stream URLs and paths.
+    """Input-surface restrictions for request-supplied stream URLs.
 
     `source_url` is handed verbatim to `ffmpeg -i` (continuous_recorder.py) and
     to `cv2.VideoCapture(..., CAP_FFMPEG)` (rtsp_monitor.py). ffmpeg supports a
@@ -158,12 +213,9 @@ class SecurityConfig(BaseModel):
     endpoint and have the contents muxed into `data_dir`, from where the MCP
     dashboard will happily serve it back as an mp4.
 
-    `prefilter.model_path` is the same shape of problem one layer down: it
-    reaches `openvino.Core().read_model()` both at validation time
-    (service._validate_target_classes) and in the running pipeline
-    (rtsp_monitor._init_prefilter), so an unrestricted value hands an
-    unauthenticated caller a file-existence oracle plus a way to have arbitrary
-    server files parsed as an IR model. See `service.validate_model_path`.
+    Prefilter model paths need no equivalent restriction here: a model is
+    selected by registry key (`prefilter_models` in config.yaml), so every path
+    reaching `read_model()` comes from trusted config rather than a request.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -184,19 +236,6 @@ class SecurityConfig(BaseModel):
             "file", "crypto", "rtp", "udp", "tcp", "tls", "rtsp", "rtsps", "http", "https",
         ]
     )
-    # Extra roots a request-supplied `prefilter.model_path` may live under, on
-    # top of the directory holding `defaults.prefilter.model_path` (the
-    # deployment's own model, injected as `PREFILTER_MODEL`). Empty (the
-    # default) means that one directory is the only permitted root — which
-    # costs nothing today, since neither the MCP server nor the API test suite
-    # ever sends `model_path`; the field exists in the schema but every caller
-    # inherits the deployment default. Set this (e.g. to `~/models`) only for a
-    # deployment that genuinely switches models over the API.
-    #
-    # Deliberately NOT a suffix allowlist: `setup_docker.sh` already checks the
-    # `.xml` IR pair deployment-side, and `read_model` also accepts ONNX/TF, so
-    # the API should not assume a format on the caller's behalf.
-    allowed_model_roots: list[str] = Field(default_factory=list)
 
 
 class WebhookConfig(BaseModel):
@@ -265,6 +304,19 @@ class AppConfig(BaseModel):
     # derives `data_dir` from the same env var. This list is the escape hatch
     # for deployments that mount the segment tree somewhere else.
     allowed_data_roots: list[str] = Field(default_factory=list)
+    # Root every registered prefilter model must live under. Mirrors the
+    # read-only bind mount docker-compose makes at the same host path, so an
+    # entry outside it is simply not readable in-container; the registry
+    # reports that up front as `rejected` instead of letting the pipeline
+    # discover it at stream start. Users organize subdirectories however they
+    # like — containment is the only rule.
+    #
+    # An internal parameter, deliberately absent from the shipped config: its
+    # value is the PREFILTER_MODEL_DIR env var (which is also what compose
+    # mounts), so a copy in the file could only disagree with the mount.
+    model_dir: str = DEFAULT_MODEL_DIR
+    # Selectable prefilter models, keyed by the name `prefilter.model` uses.
+    prefilter_models: dict[str, PrefilterModelConfig] = Field(default_factory=dict)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     logging: dict = Field(default_factory=lambda: {"level": "INFO"})
@@ -371,13 +423,14 @@ def resolve_contained_file(roots: list[str], candidate: str, kind: str) -> str:
       descendant), but `str.startswith` is the only check CodeQL's
       `py/path-injection` state machine recognises as a `SafeAccessCheck` — see
       `Path::SafeAccessCheck::Range` in the Python library, whose sole
-      implementation is `StartswithCall`. Without it the query reports
-      `read_model(model_path)` no matter how the path was validated.
+      implementation is `StartswithCall`.
 
-    For the same reason the RESOLVED path is returned and callers must use it:
-    a validate-and-discard helper leaves the raw request value on the flow into
-    the sink, so the check would be invisible to the query and, worse, the
-    pipeline would go on to load an unnormalized path.
+    The RESOLVED path is returned and callers must use it: a
+    validate-and-discard helper leaves the unnormalized value on the flow into
+    the sink, so the pipeline would go on to load a path the check never
+    actually approved.
+
+    Used by the prefilter model registry to confine entries to `model_dir`.
     """
     if not roots:
         raise ValueError(f"no permitted {kind} root is configured")
@@ -410,42 +463,70 @@ def merge_config(defaults: ConfigModelT, override: ConfigModelT | None) -> Confi
 
 def load_config(config_path: str | None = None) -> AppConfig:
     path = config_path or os.environ.get(
-        "VIDEOSTREAM_CONFIG", str(Path("config/config.yaml"))
+        "VIDEOSTREAM_CONFIG", str(Path("config/config.yaml.example"))
     )
-    if os.path.exists(path):
+    if os.path.isfile(path):
         with open(path) as f:
             raw = yaml.safe_load(f) or {}
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"videostream-analytics config must be a YAML mapping at the "
+                f"top level, got {type(raw).__name__}: {path}"
+            )
         config = AppConfig(**raw)
+        logger.info("Loaded configuration from %s", path)
+    elif os.path.lexists(path):
+        # Typically a directory bind-mounted over the config path (Docker
+        # auto-creates a missing bind-mount source as a root-owned directory).
+        raise IsADirectoryError(
+            f"videostream-analytics config path exists but is not a readable "
+            f"file: {path}. Point VIDEOSTREAM_CONFIG at a YAML file — run "
+            f"videostream-analytics/setup_vsa.sh to seed one."
+        )
     else:
+        # Built-in defaults carry an empty prefilter registry, so say loudly
+        # which path was looked for and how to fix it instead of silently
+        # running with the prefilter effectively disabled.
+        logger.warning(
+            "videostream-analytics config not found at %s — falling back to "
+            "built-in defaults (empty prefilter model registry). Run "
+            "videostream-analytics/setup_vsa.sh to seed your own config, or "
+            "copy config/config.yaml.example to that path.",
+            path,
+        )
         config = AppConfig()
 
     config.data_dir = expand_path(config.data_dir)
     config.allowed_data_roots = [expand_path(r) for r in config.allowed_data_roots]
-    config.security.allowed_model_roots = [
-        expand_path(r) for r in config.security.allowed_model_roots
-    ]
 
-    # `prefilter.model_path` may use ${HOME}/~ placeholders in config.yaml, mirroring
-    # the node side which already expands ${HOME} in monitor-yaml paths. VSA reads its
-    # own config.yaml, so expand here (same treatment as data_dir above). Per-source
-    # configs that omit model_path inherit this expanded default via merge_config.
-    if config.defaults.prefilter.model_path:
-        config.defaults.prefilter.model_path = expand_path(
-            config.defaults.prefilter.model_path
+    # PREFILTER_MODEL_DIR is the host path docker-compose bind-mounts read-only
+    # at the same path in-container, so it is the one root every registered
+    # model has to sit under. Resolve it before the registry paths below: those
+    # commonly write `${PREFILTER_MODEL_DIR}/...`, and the container may not
+    # carry the variable.
+    if model_dir := os.environ.get("PREFILTER_MODEL_DIR"):
+        config.model_dir = model_dir
+    config.model_dir = expand_path(config.model_dir)
+    if not config.model_dir or "$" in config.model_dir:
+        # Empty value, or a placeholder with no variable behind it (bare host
+        # run): fall back to the documented default root instead of leaving
+        # every registry entry to fail containment against a literal "${...}".
+        config.model_dir = expand_path(DEFAULT_MODEL_DIR)
+
+    # Registry paths may use ${PREFILTER_MODEL_DIR} / ${HOME} / ~ placeholders,
+    # mirroring the node side which already expands ${HOME} in monitor-yaml
+    # paths. Substituting from the resolved value rather than leaving it to
+    # expandvars keeps config.yaml working when the variable is not exported
+    # at all. ${MODEL_DIR} is accepted as the legacy spelling.
+    for entry in config.prefilter_models.values():
+        entry.model_path = expand_path(
+            entry.model_path.replace("${PREFILTER_MODEL_DIR}", config.model_dir)
+            .replace("${MODEL_DIR}", config.model_dir)
         )
 
     # Environment variable overrides
     if webhook_url := os.environ.get("WEBHOOK_URL"):
         config.webhook.url = webhook_url
-
-    # PREFILTER_MODEL is the absolute, container-visible OpenVINO IR path that
-    # Docker injects (config.yaml may only carry a placeholder). It overrides the
-    # prefilter model_path so /capabilities/prefilter and the runtime prefilter
-    # read the real model, even on a plain `docker compose up` that mounts the
-    # placeholder config instead of the one setup_docker.sh generates. Expanded
-    # like the config-file value above (${HOME}/~ supported).
-    if prefilter_model := os.environ.get("PREFILTER_MODEL"):
-        config.defaults.prefilter.model_path = expand_path(prefilter_model)
 
     # SMART_COMMUNITY_DATA_DIR is the MCP server's data root. VSA writes under its
     # `segments/` subdir so the DEFAULT output root lines up with the per-monitor

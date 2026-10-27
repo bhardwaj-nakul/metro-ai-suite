@@ -165,3 +165,78 @@ test("unchanged enabled configuration cannot claim success for a failed detector
     assert.equal(puts, 0);
   });
 });
+
+// ── Model switch ────────────────────────────────────────────────────────────────
+// The analytics service rejects any request that carries `model_path` (models are
+// selected by name) and does not publish the path it resolved, so a client that
+// merges a patch into the running config and sends it back never sees one. The
+// fake service enforces both halves; the preview, update and rollback must all go
+// through with only the model name.
+function modelSwitchHarness(opts: { failReady?: boolean } = {}) {
+  const live: any = { prefilter: { enabled: true, model: "yolo11s", target_classes: ["person"], min_confidence: 0.4 } };
+  const sent: { validate: any[]; put: any[] } = { validate: [], put: [] };
+  let ready = true;
+  const handler = async (url: string, options: any) => {
+    const body = options?.body ? JSON.parse(options.body) : undefined;
+    const rejectsPath = (b: any) => b?.pipeline?.prefilter && "model_path" in b.pipeline.prefilter;
+    if (url.endsWith("/pipeline/validate")) {
+      sent.validate.push(body);
+      return rejectsPath(body) ? new Response("model_path is not accepted", { status: 422 }) : new Response(JSON.stringify({ valid: true }));
+    }
+    if (options?.method === "PUT") {
+      sent.put.push(body);
+      if (rejectsPath(body)) return new Response("model_path is not accepted", { status: 422 });
+      const m = body.pipeline.prefilter?.model;
+      Object.assign(live.prefilter, body.pipeline.prefilter);
+      ready = !(opts.failReady && m === "yolo11m");        // simulate the new model failing to load
+      return new Response("{}");
+    }
+    return new Response(JSON.stringify({ pipeline_config: live, prefilter_status: { status: ready ? "ready" : "failed", error: ready ? null : "compile failed" } }));
+  };
+  return { live, sent, handler };
+}
+
+test("switching the prefilter model by name previews and applies with only the model name", async t => {
+  await environment(async ({ db, worker }) => {
+    const h = modelSwitchHarness();
+    t.mock.method(globalThis, "fetch", h.handler);
+    const patch: any = { action: "update_pipeline", monitor_id: "cam_pet", pipeline_config: { prefilter: { model: "yolo11m" } } };
+    const preview: any = await monitorCtl(db, "http://analytics", worker, { ...patch, dry_run: true });
+    assert.equal(preview.diff.after.prefilter.model, "yolo11m");
+    assert.equal(h.sent.validate.length, 1);
+    assert.ok(!("model_path" in h.sent.validate[0].pipeline.prefilter), "preview must not send a model_path");
+
+    const result: any = await monitorCtl(db, "http://analytics", worker, { ...patch, expected_revision: preview.revision, candidate_hash: preview.candidate_hash });
+    assert.equal(result.status, "updated");
+    assert.deepEqual(h.sent.put, [{ pipeline: { prefilter: { model: "yolo11m" } } }]);
+    assert.equal(h.live.prefilter.model, "yolo11m");
+    assert.equal(h.live.prefilter.target_classes[0], "person");   // untouched fields preserved
+  });
+});
+
+test("a model that fails to load is rolled back to the previous model without sending model_path", async t => {
+  await environment(async ({ db, worker }) => {
+    const h = modelSwitchHarness({ failReady: true });
+    t.mock.method(globalThis, "fetch", h.handler);
+    const patch: any = { action: "update_pipeline", monitor_id: "cam_pet", pipeline_config: { prefilter: { model: "yolo11m" } } };
+    const preview: any = await monitorCtl(db, "http://analytics", worker, { ...patch, dry_run: true });
+    await assert.rejects(
+      monitorCtl(db, "http://analytics", worker, { ...patch, expected_revision: preview.revision, candidate_hash: preview.candidate_hash }),
+      /prefilter is not ready|compile failed/,
+    );
+    assert.equal(h.sent.put.length, 2, "the update and then the rollback");
+    for (const body of h.sent.put) assert.ok(!("model_path" in body.pipeline.prefilter), `a PUT carried model_path: ${JSON.stringify(body)}`);
+    assert.equal(h.sent.put[1].pipeline.prefilter.model, "yolo11s", "rollback restores the previous model by name");
+    assert.equal(h.live.prefilter.model, "yolo11s");
+  });
+});
+
+test("a caller-supplied prefilter.model_path is still rejected", async t => {
+  await environment(async ({ db, worker }) => {
+    t.mock.method(globalThis, "fetch", async () => { throw new Error("unexpected network"); });
+    await assert.rejects(
+      monitorCtl(db, "http://analytics", worker, { action: "update_pipeline", monitor_id: "cam_pet", dry_run: true, pipeline_config: { prefilter: { model_path: "/etc/x.xml" } } }),
+      /model_path is not accepted/,
+    );
+  });
+});

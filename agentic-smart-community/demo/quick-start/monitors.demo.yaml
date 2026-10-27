@@ -37,6 +37,7 @@ monitors:
       # Hazard prefilter: NPU YOLO11s gates summary requests on target classes.
       prefilter:
         enabled: true
+        model: yolo11s
         target_classes: [person, knife, scissors, bottle]
         min_confidence: 0.4
         detect_fps: 2

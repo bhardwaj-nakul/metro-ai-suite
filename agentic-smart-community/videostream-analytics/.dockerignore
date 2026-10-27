@@ -1,0 +1,15 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build context is this directory (docker/docker-compose.yaml: `context: ..`).
+
+# setup_vsa.sh links this to the user's live config in their cache directory.
+# COPY would bake a dangling symlink carrying the build host's absolute path
+# into the image; the template (config.yaml.example) is what ships.
+config/config.yaml
+
+# Host-built, path-baked, and never COPYed — only keeps the context upload small.
+.venv/
+**/__pycache__/
+.pytest_cache/
+*.egg-info/

@@ -39,7 +39,7 @@ def cmd_serve(args):
     host = args.host or config.server.host
     port = args.port or config.server.port
 
-    app = create_app(config)
+    app = create_app(config, config_path=args.config, reload_path=args.reload_config)
     # h11 over httptools: strict RFC 9112 parsing. httptools' lenient HTTP/0.9
     # fallback routes a malformed request line (e.g. one split by a literal LF)
     # as if it were valid, and can then leave the connection half-answered —
@@ -136,9 +136,12 @@ def main():
     # Defaults are set on the main parser only; subparsers use SUPPRESS so
     # omitting a flag after the subcommand doesn't overwrite a value the user
     # passed before the subcommand.
-    parser.set_defaults(config=None, host=None, port=None)
+    parser.set_defaults(config=None, host=None, port=None, reload_config=None)
     parser.add_argument("--config", "-c", default=argparse.SUPPRESS,
                         help="Path to config.yaml")
+    parser.add_argument("--reload-config", default=argparse.SUPPRESS,
+                        help="Rename-safe view of the config file for POST /config/reload "
+                             "(e.g. through a directory bind mount); defaults to --config")
     parser.add_argument("--host", default=argparse.SUPPRESS,
                         help="Listen host (serve mode)")
     parser.add_argument("--port", type=int, default=argparse.SUPPRESS,
@@ -148,6 +151,8 @@ def main():
     # serve
     p_serve = subparsers.add_parser("serve", help="Start HTTP API server")
     p_serve.add_argument("--config", "-c", default=argparse.SUPPRESS, help="Path to config.yaml")
+    p_serve.add_argument("--reload-config", default=argparse.SUPPRESS,
+                         help="Rename-safe view of the config file for POST /config/reload")
     p_serve.add_argument("--host", default=argparse.SUPPRESS, help="Listen host")
     p_serve.add_argument("--port", type=int, default=argparse.SUPPRESS, help="Listen port")
 

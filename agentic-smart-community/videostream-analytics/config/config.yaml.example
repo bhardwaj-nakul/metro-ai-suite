@@ -1,0 +1,114 @@
+# TEMPLATE — not the live configuration. setup_vsa.sh seeds this once to
+# ${VIDEOSTREAM_CACHE_HOST}/config.yaml (default ~/.cache/.videostream-analytics/)
+# and links config/config.yaml to that copy. The seeded copy is yours and never
+# overwritten; edit it (or the symlink), not this template. Keys added here in
+# later releases fall back to code defaults in already-seeded files.
+
+# No authentication: every endpoint is open to anyone who can reach the port.
+# Loopback bind is deliberate — widen only for cross-host deployments behind
+# your own auth.
+server:
+  host: "127.0.0.1"
+  port: 8999
+
+webhook:
+  url: "http://localhost:3101/events"
+  timeout: 10
+  retry_attempts: 3
+  retry_delay: 2
+
+# Root for per-source output: <data_dir>/<source_id>/. A register request may
+# override with its own absolute data_dir.
+data_dir: "~/.mcp-smart-community/segments"
+
+# Extra roots a request-supplied data_dir may live under. Empty = data_dir
+# above is the only permitted root (right for the standard deployment, where
+# MCP sends <SMART_COMMUNITY_DATA_DIR>/segments/<monitor_id>).
+# allowed_data_roots:
+#   - "/mnt/nvme/vsa-segments"
+
+# Selectable prefilter models; a monitor picks one by key name
+# (`prefilter.model`) — a raw path in a request is rejected. An entry becomes
+# selectable only after validation: supported kind/backend, path under
+# PREFILTER_MODEL_DIR, complete IR pair on disk, readable by OpenVINO, detection-shaped
+# output. GET /capabilities/prefilter lists what passed and why others did not.
+#
+#   kind        required. Supported: detection
+#   backend     optional, default openvino (case-insensitive). Supported: openvino
+#   model_path  required. Absolute path to the IR .xml;
+#               ${PREFILTER_MODEL_DIR} / ${HOME} / ~ are expanded
+#   description optional. Shown to agents helping a user choose
+prefilter_models:
+  yolo11s:
+    kind: detection
+    backend: openvino
+    model_path: "${PREFILTER_MODEL_DIR}/yolo11s/FP16/yolo11s.xml"
+    description: "YOLO11s FP16, static 1280x704 input, COCO-80 classes"
+  yolo11m:
+    kind: detection
+    backend: openvino
+    model_path: "${PREFILTER_MODEL_DIR}/yolo11m/FP16/yolo11m.xml"
+    description: "YOLO11s FP16, static 1280x704 input, COCO-80 classes"
+
+# Allowlist for register source_url schemes — ffmpeg also speaks file:,
+# concat:, data: ..., so without this a caller could mux local files into
+# data_dir and have the dashboard serve them back.
+security:
+  allowed_source_schemes: ["rtsp", "rtsps", "http", "https"]
+  # file:// is a local-file-read primitive — only for offline evaluation.
+  allow_file_source: false
+  # Second gate inside ffmpeg itself (-protocol_whitelist); file+crypto are
+  # needed by the segment muxer's own output.
+  ffmpeg_protocol_whitelist:
+    ["file", "crypto", "rtp", "udp", "tcp", "tls", "rtsp", "rtsps", "http", "https"]
+
+defaults:
+  motion:
+    enabled: true
+    diff_threshold: 15
+    area_ratio: 0.005
+    stable_frames: 45
+  segment:
+    max_duration: 10
+    min_duration: 3.0
+  # When one motion segment ends and the next begins, the quiet gap between is
+  # emitted as a type=static event; min_duration suppresses sub-threshold gaps.
+  static:
+    enabled: true
+    min_duration: 3.0
+  recording:
+    enabled: true
+    interval_seconds: 60
+    fps: 15
+  prefilter:
+    enabled: true
+    # Key from prefilter_models above; sources omitting `prefilter` inherit
+    # this whole block.
+    model: yolo11s
+    target_classes: ["person"]
+    min_confidence: 0.4
+    min_frames_hit: 1
+    detect_fps: 2.0
+    device: "NPU"
+    long_side: 0        # 0 disables pre-inference resize
+  # ROI crop for child_safety / elder_wakeup. Default OFF so full-frame use
+  # cases are unaffected; MCP sends the block per-use-case at registration.
+  roi:
+    enabled: false
+    mode: "crop"        # crop | highlight | crop_and_concat
+    expand: 0.25
+    auto_split_area: 0.0   # 0 disables early-split; child_safety: 0.35
+  health:
+    max_failures: 30
+    recovery_strategy: "retry"
+    backoff_base: 2.0
+    backoff_max: 120.0
+  # MCP pings POST /sources/{id}/keepalive; no ping within timeout_seconds and
+  # the watchdog auto-pauses the source. Default OFF; MCP enables per-source.
+  keepalive:
+    enabled: false
+    timeout_seconds: 90.0
+    check_interval_seconds: 10.0
+
+logging:
+  level: "INFO"

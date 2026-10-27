@@ -13,36 +13,34 @@ services:
         NO_PROXY: ${NO_PROXY:-${no_proxy:-}}
     environment:
       - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:3101/events}
-      # Absolute, container-visible prefilter model path. Overrides the (possibly
-      # placeholder) model_path in the mounted config.yaml so prefilter works even
-      # on a plain `docker compose up`. Interpolated on the host; MODEL_DIR is
-      # bind-mounted at the same host path (below) so this resolves in-container.
-      # Default matches docker/set_env.sh and setup_docker.sh's DEFAULT_PREFILTER_MODEL.
-      - PREFILTER_MODEL=${PREFILTER_MODEL:-${HOME}/models/openvino/yolo11s/FP16/yolo11s.xml}
-      # MCP server's data root. Defaults to ~/.mcp-smart-community (the MCP default);
-      # override by exporting SMART_COMMUNITY_DATA_DIR before `docker compose up`.
-      # VSA derives its default output root as <SMART_COMMUNITY_DATA_DIR>/segments; the
-      # per-monitor data_dir MCP sends (<root>/segments/<id>) still takes priority.
+      # Root every registered prefilter model must live under, and what
+      # `${PREFILTER_MODEL_DIR}` in the config expands to. Passed in-container
+      # because the container sets HOME=/tmp. Same value as the ro mount below.
+      - PREFILTER_MODEL_DIR=${PREFILTER_MODEL_DIR:-${HOME}/models/openvino}
+      # MCP server's data root; VSA writes under <root>/segments.
       - SMART_COMMUNITY_DATA_DIR=${SMART_COMMUNITY_DATA_DIR:-${HOME}/.mcp-smart-community}
       - http_proxy=
       - https_proxy=
       - no_proxy=localhost,127.0.0.1
       # Writable home for the non-root container user (see `user:` below).
       - HOME=/tmp
-      # Timezone align with host
       - TZ=${TZ:-Asia/Shanghai}
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      # Identity bind mount (host X -> container X): the absolute data_dir MCP sends
-      # (<root>/segments/<id>) resolves to the SAME real host directory inside the
-      # container, so recordings/motion_events land on the host where the MCP clip
-      # extractor / VLM can read them.
+      # Identity bind mount (host X -> container X): the absolute data_dir MCP
+      # sends resolves to the same real host directory inside the container.
       - ${SMART_COMMUNITY_DATA_DIR:-${HOME}/.mcp-smart-community}:${SMART_COMMUNITY_DATA_DIR:-${HOME}/.mcp-smart-community}
-      - ${MODEL_DIR:-${HOME}/models}:${MODEL_DIR:-${HOME}/models}:ro
-      # setup_docker.sh generates this host-side runtime configuration with the
-      # absolute PREFILTER_MODEL path before starting the service.
-      - ${VIDEOSTREAM_CONFIG_FILE:-../config/config.yaml}:/app/config/config.yaml:ro
-    entrypoint: ["videostream-analytics", "serve", "--config", "/app/config/config.yaml"]
+      - ${PREFILTER_MODEL_DIR:-${HOME}/models/openvino}:${PREFILTER_MODEL_DIR:-${HOME}/models/openvino}:ro
+      # setup_vsa.sh regenerates this file from the example on every run (a differing
+      # previous copy is kept as <file>.<YYYYMMDD-HHMMSS>.bak). The fallback keeps
+      # a bare `docker compose up` working off the template; it must NOT point
+      # into the cache dir — Docker would create a missing source as a
+      # root-owned directory and crash the service.
+      - ${VIDEOSTREAM_CONFIG_FILE:-../config/config.yaml.example}:/app/config/config.yaml:ro
+      # Directory view of the config home for config reload: single-file mounts
+      # pin the startup inode, hiding atomic-save edits (VS Code, vim, sed -i).
+      - ${VIDEOSTREAM_CACHE_HOST:-../config}:/host-config:ro
+    entrypoint: ["videostream-analytics", "serve", "--config", "/app/config/config.yaml", "--reload-config", "/host-config/config.yaml"]
     # Device passthrough: /dev/accel/accel0 is the Intel NPU, /dev/dri is the iGPU
     # (renderD128 used by the OpenVINO GPU plugin). The host NPU node is
     # crw-rw---- root render; group_add adds the host 'render' gid (992) so a

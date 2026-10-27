@@ -16,6 +16,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from shared.model_registry import ModelShapeInfo
+
 logger = logging.getLogger(__name__)
 
 _COCO_CLASSES = [
@@ -52,21 +54,89 @@ def labels_from_ov_model(ov_model) -> tuple[list[str], str]:
     return list(_COCO_CLASSES), "fallback_coco"
 
 
-def read_model_labels(model_path: str) -> tuple[list[str], str]:
-    """Read class labels from an OpenVINO IR model WITHOUT compiling it.
+def _port_shape(ov_model, port: str):
+    """Partial shape of input/output 0, or ``None`` if it cannot be read."""
+    try:
+        return getattr(ov_model, port)(0).partial_shape
+    except Exception:
+        return None
 
-    ``read_model`` alone is enough to reach ``rt_info`` — it does not touch the
-    inference device (no NPU/GPU compile), so this is cheap enough for a
-    capability query. Returns ``(class_names, labels_source)``; ``labels_source``
-    is ``unavailable`` when the model cannot be read at all.
+
+def inspect_ov_model(ov_model) -> ModelShapeInfo:
+    """Derive labels + I/O shapes + detection-layout verdict from a read model."""
+    class_names, labels_source = labels_from_ov_model(ov_model)
+    in_shape = _port_shape(ov_model, "input")
+    out = _port_shape(ov_model, "output")
+    input_shape = str(in_shape) if in_shape is not None else "unknown"
+    output_shape = str(out) if out is not None else "unknown"
+
+    is_detection = False
+    detection_error = ""
+    try:
+        if out is None:
+            raise ValueError("output port is unreadable")
+        if len(out) != 3:
+            detection_error = (
+                f"expected a rank-3 detection output [1, 4+nc, anchors], got {output_shape}"
+            )
+        else:
+            channels = out[1]
+            if channels.is_dynamic:
+                # Nothing to contradict; the per-frame decode will cope.
+                is_detection = True
+            else:
+                nc = channels.get_length() - 4
+                if nc <= 0:
+                    detection_error = (
+                        f"detection output must have more than 4 channels, got {output_shape}"
+                    )
+                elif labels_source == "embedded" and nc != len(class_names):
+                    detection_error = (
+                        f"output has {nc} class channels but the model embeds "
+                        f"{len(class_names)} labels"
+                    )
+                else:
+                    is_detection = True
+    except Exception as e:  # noqa: BLE001 — a shape we cannot read is not a detection shape
+        detection_error = f"could not read output shape: {e}"
+
+    return ModelShapeInfo(
+        class_names=class_names,
+        labels_source=labels_source,
+        input_shape=input_shape,
+        output_shape=output_shape,
+        is_detection=is_detection,
+        detection_error=detection_error,
+    )
+
+
+def inspect_model(model_path: str) -> ModelShapeInfo | None:
+    """Inspect an OpenVINO IR model WITHOUT compiling it.
+
+    ``read_model`` alone is enough to reach ``rt_info`` and the port shapes — it
+    does not touch the inference device (no NPU/GPU compile), so this is cheap
+    enough for a capability query. Returns ``None`` when the model cannot be
+    read at all.
     """
     import openvino as ov
 
     try:
         ov_model = ov.Core().read_model(model_path)
     except Exception:
+        return None
+    return inspect_ov_model(ov_model)
+
+
+def read_model_labels(model_path: str) -> tuple[list[str], str]:
+    """Read class labels from an OpenVINO IR model WITHOUT compiling it.
+
+    Returns ``(class_names, labels_source)``; ``labels_source`` is
+    ``unavailable`` when the model cannot be read at all.
+    """
+    info = inspect_model(model_path)
+    if info is None:
         return list(_COCO_CLASSES), "unavailable"
-    return labels_from_ov_model(ov_model)
+    return info.class_names, info.labels_source
 
 
 _NMS_IOU_THRESH = 0.45
@@ -193,7 +263,15 @@ class YoloPrefilter:
         core.set_property({"CACHE_DIR": cache_dir})
         ov_model = core.read_model(model_path)
 
-        self._class_names, _ = labels_from_ov_model(ov_model)
+        info = inspect_ov_model(ov_model)
+        if not info.is_detection:
+            # Raise rather than compile: _postprocess would read a non-detection
+            # tensor as boxes and emit confident nonsense. The caller
+            # (rtsp_monitor._init_prefilter) degrades to no-prefilter and logs.
+            raise ValueError(
+                f"{model_path} is not a usable detection model: {info.detection_error}"
+            )
+        self._class_names = info.class_names
 
         in_shape = ov_model.input(0).partial_shape
         self._is_dynamic = in_shape.is_dynamic
@@ -204,6 +282,15 @@ class YoloPrefilter:
             dims = [d.get_length() for d in in_shape]
             self._static_h = int(dims[2])
             self._static_w = int(dims[3])
+        elif device.upper().startswith("NPU"):
+            # The NPU plugin needs static input shapes; compile_model will fail
+            # outright. Name the fix here, since the compile error alone does not.
+            logger.warning(
+                "%s has a dynamic input shape (%s) but device=%s — the NPU plugin "
+                "requires static shapes. Re-export the IR with a fixed input size "
+                "or run this model on CPU/GPU.",
+                model_path, info.input_shape, device,
+            )
 
         self._compiled = self._compile_with_retry(core, ov_model, device.upper())
         self._infer_req = self._compiled.create_infer_request()

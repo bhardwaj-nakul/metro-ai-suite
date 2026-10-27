@@ -10,6 +10,8 @@ webhook:
 
 data_dir: "/tmp/videostream-test-data"
 
+model_dir: "/tmp/vsa-test-models"
+
 defaults:
   motion:
     diff_threshold: 25
@@ -23,7 +25,7 @@ defaults:
     fps: 15
   prefilter:
     enabled: true
-    model_path: ""
+    model: ""
     target_classes: ["person"]
     min_confidence: 0.4
     min_frames_hit: 2

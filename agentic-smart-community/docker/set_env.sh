@@ -33,6 +33,10 @@ export HF_ENDPOINT=${HF_ENDPOINT:-https://huggingface.co}
 
 # llm-scaler image
 export VLLM_IMAGE=intel/llm-scaler-vllm:0.14.0-b8.3.2
+# export VLLM_IMAGE=intel/llm-scaler-vllm:0.26.0-b2
+
+# Whether to offload model weights before quantization
+export VLLM_OFFLOAD_WEIGHTS_BEFORE_QUANT=1
 
 # Model + context window.
 export LLM_MODEL=${LLM_MODEL:-Qwen/Qwen3.6-35B-A3B}
@@ -130,6 +134,9 @@ fi
 # see docker/mcp-server/). Override only if the MCP server listens elsewhere.
 export WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:3101/events}
 
-# OpenVINO prefilter model, e.g., yolo11s. Preserve an explicitly supplied
-# path so setup_docker.sh can validate or prepare that model at runtime.
-export PREFILTER_MODEL=${PREFILTER_MODEL:-${HOME}/models/openvino/yolo11s/FP16/yolo11s.xml}
+# Prefilter model root.
+export PREFILTER_MODEL_DIR=${PREFILTER_MODEL_DIR:-${HOME}/models/openvino}
+
+# VSA's user-owned configuration home
+export VIDEOSTREAM_CACHE_HOST=${VIDEOSTREAM_CACHE_HOST:-${HOME}/.cache/.videostream-analytics}
+mkdir -p "${VIDEOSTREAM_CACHE_HOST}"
