@@ -42,7 +42,15 @@ data:
   MM_DATAPREP_ROI_CONSOLIDATION_CLASS_AWARE: {{ .Values.global.env.roiConsolidationClassAware | quote }}
   MM_DATAPREP_ROI_CONSOLIDATION_CONTEXT_SCALE: {{ .Values.global.env.roiConsolidationContextScale | quote }}
   MM_DATAPREP_FRAMES_TEMP_DIR: {{ .Values.global.env.framesTempDir | quote }}
-  MM_DATAPREP_DETECTION_MODEL_DIR: "/app/models/yolox"
+  MM_DATAPREP_DETECTION_MODEL_DIR: "/app/models/object-detection"
+  {{- if eq (lower (printf "%v" .Values.global.env.enableObjectDetection)) "true" }}
+  MM_DATAPREP_DETECTION_MODEL_NAME: {{ required "global.env.detectionModelName is required when object detection is enabled (set a Hugging Face OpenVINO/<repo> model, or global.env.enableObjectDetection=false)" .Values.global.env.detectionModelName | quote }}
+  {{- else if .Values.global.env.detectionModelName }}
+  MM_DATAPREP_DETECTION_MODEL_NAME: {{ .Values.global.env.detectionModelName | quote }}
+  {{- end }}
+  {{- with .Values.global.env.detectionClasses }}
+  MM_DATAPREP_DETECTION_CLASSES: {{ . | quote }}
+  {{- end }}
   MM_DATAPREP_MAX_PARALLEL_WORKERS: {{ .Values.global.env.maxParallelWorkers | quote }}
   MM_DATAPREP_VIDEO_SHM_MAX_BLOCKS: {{ .Values.global.env.sdkVideoShmMaxBlocks | quote }}
   MM_DATAPREP_VIDEO_SHM_BLOCK_SIZE: {{ .Values.global.env.sdkVideoShmBlockSize | quote }}
@@ -52,6 +60,7 @@ data:
   MM_DATAPREP_DETECTION_WORKER_THREADS: {{ .Values.global.env.sdkDetectionWorkerThreads | quote }}
   MM_DATAPREP_EMBED_WORKER_THREADS: {{ .Values.global.env.sdkEmbedWorkerThreads | quote }}
   MM_DATAPREP_PIPELINE_QUEUE_GET_TIMEOUT_S: {{ .Values.global.env.sdkPipelineQueueGetTimeoutS | quote }}
+  MM_DATAPREP_PIPELINE_STALL_TIMEOUT_S: {{ hasKey .Values.global.env "pipelineStallTimeoutS" | ternary .Values.global.env.pipelineStallTimeoutS 300 | quote }}
   MM_DATAPREP_SAVE_RUNTIME_PIPELINE_STATS: {{ .Values.global.env.saveRuntimePipelineStats | quote }}
   MM_DATAPREP_ENABLE_TRACING: {{ .Values.global.env.sdkEnableTracing | quote }}
   MM_DATAPREP_VIDEO_FRAME_DECODER_WORKERS: {{ .Values.global.env.videoFrameDecoderWorkers | quote }}

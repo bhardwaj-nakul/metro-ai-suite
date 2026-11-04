@@ -129,7 +129,7 @@ elif [ "$1" = "--down" ]; then
 elif [ "$1" = "--clean-data" ]; then
     stop_containers || return 1
     echo -e "${YELLOW}Removing Docker volumes and networks created by the application... ${NC}"
-    docker volume rm docker_minio_data docker_pg_data docker_vdms_db docker_milvus_db docker_milvus_etcd docker_data_prep docker_dataprep-yolox-models docker_mosquitto_data docker_mosquitto_log docker_redis_data docker_frigate_recordings data-prep minikube 2>/dev/null || true
+    docker volume rm docker_minio_data docker_pg_data docker_vdms_db docker_milvus_db docker_milvus_etcd docker_data_prep docker_dataprep-detection-models docker_dataprep-yolox-models docker_mosquitto_data docker_mosquitto_log docker_redis_data docker_frigate_recordings data-prep minikube 2>/dev/null || true
     docker network rm docker_live-video-network live-video-network 2>/dev/null || true
     echo -e "${GREEN}Clean operation completed successfully! ${NC}"
     return 0
@@ -222,6 +222,16 @@ export DEFAULT_BUCKET_NAME=${DEFAULT_BUCKET_NAME:-vdms-bucket}
 export FRAME_INTERVAL=${FRAME_INTERVAL:-15}
 export ENABLE_OBJECT_DETECTION=${ENABLE_OBJECT_DETECTION:-true}
 export DETECTION_CONFIDENCE=${DETECTION_CONFIDENCE:-0.85}
+# Hugging Face OpenVINO object-detection model (OpenVINO/<repo>) for DataPrep crops.
+# No default: required while object detection is enabled. Optional comma-separated
+# class filter, for example DATAPREP_DETECTION_CLASSES=person,car.
+export DATAPREP_DETECTION_MODEL=${DATAPREP_DETECTION_MODEL:-}
+export DATAPREP_DETECTION_CLASSES=${DATAPREP_DETECTION_CLASSES:-}
+if [[ ! "${ENABLE_OBJECT_DETECTION,,}" =~ ^(false|0|no|off)$ ]] && [ -z "$DATAPREP_DETECTION_MODEL" ]; then
+    echo -e "${RED}ERROR: DATAPREP_DETECTION_MODEL is not set. Set a Hugging Face OpenVINO detection model (OpenVINO/<repo>; see https://huggingface.co/OpenVINO) or export ENABLE_OBJECT_DETECTION=false.${NC}" >&2
+    return 1
+fi
+export MM_DATAPREP_PIPELINE_STALL_TIMEOUT_S=${MM_DATAPREP_PIPELINE_STALL_TIMEOUT_S:-300}
 export ROI_CONSOLIDATION_ENABLED=${ROI_CONSOLIDATION_ENABLED:-false}
 export ROI_CONSOLIDATION_IOU_THRESHOLD=${ROI_CONSOLIDATION_IOU_THRESHOLD:-0.2}
 export ROI_CONSOLIDATION_CLASS_AWARE=${ROI_CONSOLIDATION_CLASS_AWARE:-false}
@@ -259,7 +269,7 @@ export VS_BATCH_JOB_TIMEOUT_SECONDS=${VS_BATCH_JOB_TIMEOUT_SECONDS:-3600}
 # Per-component device selection (CPU default | GPU | NPU). Each component is
 # independent — parity with the Helm charts. No "baseline" device.
 #   DATAPREP_EMBEDDING_DEVICE → in-process embedding in multimodal-dataprep
-#   DATAPREP_DETECTION_DEVICE → YOLOX object detection in multimodal-dataprep
+#   DATAPREP_DETECTION_DEVICE → object detection in multimodal-dataprep
 #   MME_EMBEDDING_DEVICE      → query embedding used by vector-retriever
 export DATAPREP_EMBEDDING_DEVICE=${DATAPREP_EMBEDDING_DEVICE:-"CPU"}
 export DATAPREP_DETECTION_DEVICE=${DATAPREP_DETECTION_DEVICE:-"CPU"}
@@ -326,9 +336,9 @@ else
     echo -e "${YELLOW}/dev/accel/accel0 not found, will mount /dev/null instead.${NC}"
 fi
 
-# YOLOX models
-export YOLOX_MODELS_VOLUME_NAME=${YOLOX_MODELS_VOLUME_NAME:-dataprep-yolox-models}
-export YOLOX_MODELS_MOUNT_PATH=${YOLOX_MODELS_MOUNT_PATH:-/app/models/yolox}
+# Object detection model cache volume (Hugging Face OpenVINO IR models)
+export DETECTION_MODELS_VOLUME_NAME=${DETECTION_MODELS_VOLUME_NAME:-dataprep-detection-models}
+export DETECTION_MODELS_MOUNT_PATH=${DETECTION_MODELS_MOUNT_PATH:-/app/models/object-detection}
 
 # Smart NVR settings
 if [ -z "${MQTT_USER}" ] || [ -z "${MQTT_PASSWORD}" ]; then

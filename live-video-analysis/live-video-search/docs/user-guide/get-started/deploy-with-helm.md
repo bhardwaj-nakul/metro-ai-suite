@@ -76,6 +76,7 @@ Update these required values:
 | `global.credentials.mqttUser` | MQTT user | `<your-mqtt-user>` |
 | `global.credentials.mqttPassword` | MQTT password | `<your-mqtt-password>` |
 | `global.env.embeddingModelName` | Embedding model used by search stack | `CLIP/clip-vit-b-32` |
+| `global.env.detectionModelName` | Hugging Face OpenVINO object-detection model for DataPrep (`OpenVINO/<repo>`). Required while `global.env.enableObjectDetection` is `'true'`. Each model carries its own license; check the model card. | `OpenVINO/yolox_s-int8-ov` |
 
 Common optional values:
 
@@ -98,6 +99,9 @@ Common optional values:
 | `global.devices.multimodalEmbedding.key` | MME accelerator key (required when device=GPU/NPU) | `gpu.intel.com/xe`, `gpu.intel.com/i915`, or `npu.intel.com/accel` |
 | `global.devices.multimodalDataprep.embedding.device` | DataPrep indexing-embedding device | `CPU`, `GPU`, or `NPU` |
 | `global.devices.multimodalDataprep.embedding.key` | DataPrep embedding accelerator key (required when embedding.device=GPU/NPU) | `gpu.intel.com/xe`, `gpu.intel.com/i915`, or `npu.intel.com/accel` |
+| `global.env.enableObjectDetection` | Run object detection before embedding; set `'false'` to embed whole frames | `'true'` (default) or `'false'` |
+| `global.env.detectionClasses` | Comma-separated classes to keep from the detection model's labels (empty keeps all) | `person,car` |
+| `global.env.detectionConfidence` | Minimum detection score | `'0.85'` |
 | `global.devices.multimodalDataprep.detection.device` | DataPrep detection execution device | `CPU`, `GPU`, or `NPU` |
 | `global.devices.multimodalDataprep.detection.key` | DataPrep detection accelerator key (required when detection.device=GPU/NPU) | `gpu.intel.com/xe`, `gpu.intel.com/i915`, or `npu.intel.com/accel` |
 | `global.accelGroupIds` | Host group ids owning the accelerator device nodes (`/dev/dri`, `/dev/accel`); added to the pod `supplementalGroups` when a service uses GPU/NPU | `[992]` |

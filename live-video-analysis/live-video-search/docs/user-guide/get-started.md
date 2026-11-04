@@ -75,6 +75,11 @@ Before running the application, you need to set several environment variables:
     # Embedding model for search
     export MULTIMODAL_EMBEDDING_MODEL="CLIP/clip-vit-b-32"
 
+    # Object-detection model for DataPrep (any OpenVINO/<repo> detection model
+    # from https://huggingface.co/OpenVINO). Not needed when
+    # ENABLE_OBJECT_DETECTION=false.
+    export DATAPREP_DETECTION_MODEL="OpenVINO/yolox_s-int8-ov"
+
     # MQTT credentials (Smart NVR)
     export MQTT_USER=<mqtt-user>
     export MQTT_PASSWORD=<mqtt-pass>
@@ -118,12 +123,29 @@ You can customize the application behavior by setting the following optional env
     IoU(A, B) = \frac{|A \cap B|}{|A \cup B|}
     $$
 
-3. Select devices independently for indexing, object detection, and query embedding (each defaults to `CPU`):
+3. **Tune object detection (Video Search Mode)**:
+
+    DataPrep downloads the detection model named by `DATAPREP_DETECTION_MODEL` from Hugging Face on first start and caches it in the `dataprep-detection-models` volume. Use the following optional variables to tune detection:
+
+    ```bash
+    # Keep only these classes (comma-separated names from the model's label set)
+    export DATAPREP_DETECTION_CLASSES=person,car
+
+    # Minimum detection score (default: 0.85)
+    export DETECTION_CONFIDENCE=0.85
+
+    # Skip detection and embed whole frames (DATAPREP_DETECTION_MODEL is then optional)
+    export ENABLE_OBJECT_DETECTION=false
+    ```
+
+    > **License note:** Each model carries its own license. For example, the `OpenVINO/yolox_*` models are Apache-2.0, while `OpenVINO/YOLO11*` models are AGPL-3.0. Review the model card before you use a model.
+
+4. Select devices independently for indexing, object detection, and query embedding (each defaults to `CPU`):
 
     ```bash
     # CPU / GPU / NPU
     export DATAPREP_EMBEDDING_DEVICE=GPU   # indexing embedding in multimodal-dataprep
-    export DATAPREP_DETECTION_DEVICE=GPU   # YOLOX detection in multimodal-dataprep
+    export DATAPREP_DETECTION_DEVICE=GPU   # object detection in multimodal-dataprep
     export MME_EMBEDDING_DEVICE=GPU        # query embedding used by vector-retriever
     ```
 
@@ -131,7 +153,7 @@ You can customize the application behavior by setting the following optional env
 
     > **NPU note:** Not all embedding backends and model combinations support NPU. Check supported model/device combinations at the [OpenVINO Supported Models](https://docs.openvino.ai/2026/documentation/compatibility-and-support/supported-models.html) page before selecting `NPU`.
 
-4. **Select the vector database backend**:
+5. **Select the vector database backend**:
 
     `video-search` always delegates similarity search to `vector-retriever`. The default VDMS mode uses the `vector-retriever-vdms` image. Milvus mode adds the standalone Milvus services and uses `vector-retriever-milvus`. Object storage remains on MinIO in both modes.
 
@@ -145,7 +167,7 @@ You can customize the application behavior by setting the following optional env
 
     `VDB_METRIC_TYPE` and `VDB_INDEX_TYPE` configure the shared write/read contract between Multimodal DataPrep and Vector Retriever. Their defaults are `IP` and `FLAT`.
 
-5. **Optional: tune continuous-ingestion watcher batches**:
+6. **Optional: tune continuous-ingestion watcher batches**:
 
     ```bash
     export VS_WATCH_BATCH_SIZE=10
@@ -157,7 +179,7 @@ You can customize the application behavior by setting the following optional env
     Router continuous camera watcher and the Search MS directory watcher. They
     do not affect single event-rule clips or video summarization.
 
-6. **Optional: disable live metrics**:
+7. **Optional: disable live metrics**:
 
     Metrics Manager is enabled by default. Disable it before startup when host
     and DataPrep throughput metrics are not required:

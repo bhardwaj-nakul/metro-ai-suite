@@ -1,5 +1,28 @@
 # Release Notes: Live Video Search
 
+## Version 2026.3.0-rc1
+
+**Release Date**: November 6, 2026
+
+**New**:
+
+- Added the `--pull-always` option to `setup.sh` (`PULL_ALWAYS=true` for `make deploy`) to refresh cached images from the registry before starting the stack.
+- Multimodal DataPrep object detection now uses Hugging Face `OpenVINO/*` detection models instead of the bundled YOLOX download. Select the model with `DATAPREP_DETECTION_MODEL` (Compose, `setup.sh`, Makefile) or `global.env.detectionModelName` (Helm). The model is downloaded on first start and cached in the `dataprep-detection-models` volume (Helm: `detectionmodels` sub-path).
+- Added `DATAPREP_DETECTION_CLASSES` (Helm: `global.env.detectionClasses`) to keep only selected classes from the detection model's label set.
+- Exposed the DataPrep pipeline stall watchdog through `MM_DATAPREP_PIPELINE_STALL_TIMEOUT_S` (Helm: `global.env.pipelineStallTimeoutS`, default `300`, `0` disables).
+
+**Improved**:
+
+- Aligned LVS with the Video Search and Summarization 2026.3.0-rc1 stack (Multimodal DataPrep, Vector Retriever, and Multimodal Embedding Serving), including the updated GPU drivers in the DataPrep and Multimodal Embedding Serving images.
+- `setup.sh`, `make validate-env`, and the Helm chart now fail early with a clear message when object detection is enabled and no detection model is set.
+- Updated the documentation links to the new Metro AI Suite repository.
+
+**Upgrade Notes**:
+
+- Breaking: `DATAPREP_DETECTION_MODEL` (Helm: `global.env.detectionModelName`) is required while object detection is enabled. There is no default model. For example, set `OpenVINO/yolox_s-int8-ov`, or set `ENABLE_OBJECT_DETECTION=false` (Helm: `global.env.enableObjectDetection: 'false'`) to embed whole frames.
+- Each detection model carries its own license (for example, `OpenVINO/yolox_*` is Apache-2.0 and `OpenVINO/YOLO11*` is AGPL-3.0). Review the model card before use.
+- The legacy `docker_dataprep-yolox-models` volume is no longer used. `source setup.sh --clean-data` removes it.
+
 ## Version 2026.2.0
 
 **Release Date**: September 10, 2026

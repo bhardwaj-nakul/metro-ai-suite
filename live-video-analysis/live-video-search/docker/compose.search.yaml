@@ -249,6 +249,7 @@ services:
       MM_DATAPREP_DETECTION_WORKER_THREADS: ${SDK_DETECTION_WORKER_THREADS:-2}
       MM_DATAPREP_EMBED_WORKER_THREADS: ${SDK_EMBED_WORKER_THREADS:-2}
       MM_DATAPREP_PIPELINE_QUEUE_GET_TIMEOUT_S: ${SDK_PIPELINE_QUEUE_GET_TIMEOUT_S:-1.0}
+      MM_DATAPREP_PIPELINE_STALL_TIMEOUT_S: ${MM_DATAPREP_PIPELINE_STALL_TIMEOUT_S:-300}
       MM_DATAPREP_SAVE_RUNTIME_PIPELINE_STATS: ${SAVE_RUNTIME_PIPELINE_STATS:-false}
       MM_DATAPREP_ENABLE_TRACING: ${SDK_ENABLE_TRACING:-false}
       MM_DATAPREP_VIDEO_FRAME_DECODER_WORKERS: ${VIDEO_FRAME_DECODER_WORKERS:-2}
@@ -261,7 +262,10 @@ services:
       MM_DATAPREP_ROI_CONSOLIDATION_CLASS_AWARE: ${ROI_CONSOLIDATION_CLASS_AWARE:-false}
       MM_DATAPREP_ROI_CONSOLIDATION_CONTEXT_SCALE: ${ROI_CONSOLIDATION_CONTEXT_SCALE:-0.2}
       MM_DATAPREP_FRAMES_TEMP_DIR: ${FRAMES_TEMP_DIR:-/tmp/dataprep}
-      MM_DATAPREP_DETECTION_MODEL_DIR: ${YOLOX_MODELS_MOUNT_PATH}
+      # Object detection (Hugging Face OpenVINO model, cached in a volume)
+      MM_DATAPREP_DETECTION_MODEL_DIR: ${DETECTION_MODELS_MOUNT_PATH:-/app/models/object-detection}
+      MM_DATAPREP_DETECTION_MODEL_NAME: ${DATAPREP_DETECTION_MODEL:-}
+      MM_DATAPREP_DETECTION_CLASSES: ${DATAPREP_DETECTION_CLASSES:-}
       MM_DATAPREP_LOG_LEVEL: ${MM_DATAPREP_LOG_LEVEL:-INFO}
       MM_DATAPREP_ALLOW_DUPLICATE_UPLOADS: ${MM_DATAPREP_ALLOW_DUPLICATE_UPLOADS:-true}
       MM_DATAPREP_ALLOW_ORIGINS: ${ALLOW_ORIGINS:-*}
@@ -292,7 +296,7 @@ services:
       retries: 40
       start_period: 5s
     volumes:
-      - "${YOLOX_MODELS_VOLUME_NAME:-dataprep-yolox-models}:${YOLOX_MODELS_MOUNT_PATH:-/app/models/yolox}"
+      - "${DETECTION_MODELS_VOLUME_NAME:-dataprep-detection-models}:${DETECTION_MODELS_MOUNT_PATH:-/app/models/object-detection}"
       - data_prep:/tmp/dataprep
       - ov_models:/home/appuser/.cache/huggingface
       - ov_models:${OV_MODELS_DIR:-/app/ov_models}
@@ -411,7 +415,7 @@ volumes:
     driver: local
   data_prep:
     driver: local
-  dataprep-yolox-models:
+  dataprep-detection-models:
     driver: local
 
 networks:

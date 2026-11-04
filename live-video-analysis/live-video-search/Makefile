@@ -25,6 +25,9 @@
 #   MULTIMODAL_EMBEDDING_MODEL - Embedding model (default: CLIP/clip-vit-b-32)
 #   DATAPREP_EMBEDDING_DEVICE - Indexing embedding device (default: CPU)
 #   DATAPREP_DETECTION_DEVICE - Object detection device (default: CPU)
+#   DATAPREP_DETECTION_MODEL  - Hugging Face OpenVINO detection model, OpenVINO/<repo>
+#                               (no default; required unless ENABLE_OBJECT_DETECTION=false)
+#   DATAPREP_DETECTION_CLASSES - Optional comma-separated detection class filter
 #   MME_EMBEDDING_DEVICE      - Query embedding device (default: CPU)
 #   APP_HOST_PORT             - Main app port (default: 12345)
 #   ENABLE_METRICS_MANAGER    - Live system/DataPrep metrics (default: true)
@@ -145,6 +148,9 @@ define EXPORT_RUNTIME_ENV
 	export ROI_CONSOLIDATION_CONTEXT_SCALE="$${ROI_CONSOLIDATION_CONTEXT_SCALE:-$(ROI_CONSOLIDATION_CONTEXT_SCALE)}"
 	export DATAPREP_EMBEDDING_DEVICE="$${DATAPREP_EMBEDDING_DEVICE:-$(DATAPREP_EMBEDDING_DEVICE)}"
 	export DATAPREP_DETECTION_DEVICE="$${DATAPREP_DETECTION_DEVICE:-$(DATAPREP_DETECTION_DEVICE)}"
+	export ENABLE_OBJECT_DETECTION="$${ENABLE_OBJECT_DETECTION:-$(ENABLE_OBJECT_DETECTION)}"
+	export DATAPREP_DETECTION_MODEL="$${DATAPREP_DETECTION_MODEL:-$(DATAPREP_DETECTION_MODEL)}"
+	export DATAPREP_DETECTION_CLASSES="$${DATAPREP_DETECTION_CLASSES:-$(DATAPREP_DETECTION_CLASSES)}"
 	export MME_EMBEDDING_DEVICE="$${MME_EMBEDDING_DEVICE:-$(MME_EMBEDDING_DEVICE)}"
 	export VECTORDB_BACKEND="$${VECTORDB_BACKEND:-$(VECTORDB_BACKEND)}"
 	export ENABLE_METRICS_MANAGER="$${ENABLE_METRICS_MANAGER:-$(ENABLE_METRICS_MANAGER)}"
@@ -256,7 +262,15 @@ validate-env:
 		echo "  export POSTGRES_USER=<user> POSTGRES_PASSWORD=<pass>"; \
 		echo "  export MQTT_USER=<user> MQTT_PASSWORD=<pass>"; \
 		exit 1; \
-	fi
+	fi; \
+	case "$$(printf '%s' "$(ENABLE_OBJECT_DETECTION)" | tr '[:upper:]' '[:lower:]')" in \
+		false|0|no|off) ;; \
+		*) if [ -z "$(DATAPREP_DETECTION_MODEL)" ]; then \
+			echo "❌ DATAPREP_DETECTION_MODEL is not set. Set a Hugging Face OpenVINO detection model"; \
+			echo "   (OpenVINO/<repo>; see https://huggingface.co/OpenVINO) or ENABLE_OBJECT_DETECTION=false."; \
+			exit 1; \
+		fi ;; \
+	esac
 
 validate-device:
 	@for value in "$(DATAPREP_EMBEDDING_DEVICE)" "$(DATAPREP_DETECTION_DEVICE)" "$(MME_EMBEDDING_DEVICE)"; do \
@@ -304,6 +318,7 @@ deploy: validate
 	@echo "  MULTIMODAL_EMBEDDING_MODEL: $(MULTIMODAL_EMBEDDING_MODEL)"
 	@echo "  DATAPREP_EMBEDDING_DEVICE: $(DATAPREP_EMBEDDING_DEVICE)"
 	@echo "  DATAPREP_DETECTION_DEVICE: $(DATAPREP_DETECTION_DEVICE)"
+	@echo "  DATAPREP_DETECTION_MODEL: $(or $(DATAPREP_DETECTION_MODEL),(not set))"
 	@echo "  MME_EMBEDDING_DEVICE: $(MME_EMBEDDING_DEVICE)"
 	@echo "  PULL_ALWAYS:        $(or $(PULL_ALWAYS),false)"
 	@echo ""
@@ -611,6 +626,9 @@ help:
 	@echo "  APP_HOST_PORT           Main app port (default: 12345)"
 	@echo "  DATAPREP_EMBEDDING_DEVICE  Indexing embedding device: CPU, GPU, or NPU"
 	@echo "  DATAPREP_DETECTION_DEVICE  Object detection device: CPU, GPU, or NPU"
+	@echo "  DATAPREP_DETECTION_MODEL   Hugging Face OpenVINO detection model, OpenVINO/<repo> (required"
+	@echo "                             unless ENABLE_OBJECT_DETECTION=false; no default)"
+	@echo "  DATAPREP_DETECTION_CLASSES Optional comma-separated detection class filter, e.g. person,car"
 	@echo "  MME_EMBEDDING_DEVICE       Query embedding device: CPU, GPU, or NPU"
 	@echo "  VECTORDB_BACKEND        vdms (default) or milvus"
 	@echo "  VS_WATCH_BATCH_SIZE     Continuous-ingestion watcher batch size (default: 10; max: 100)"
