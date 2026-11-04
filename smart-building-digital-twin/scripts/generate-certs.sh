@@ -48,6 +48,7 @@ DNS.1 = ${host_short}.scenescape.intel.com
 DNS.2 = ${host_short}
 DNS.3 = localhost
 IP.1 = 127.0.0.1
+${HOST_IP:+IP.2 = $HOST_IP}
 EOF
 
   openssl genrsa -out "$key_path" 2048 2>/dev/null

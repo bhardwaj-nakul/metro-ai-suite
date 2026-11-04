@@ -9,7 +9,7 @@ import argparse
 from pathlib import Path
 
 
-PIPELINE_TEMPLATE = """rtspsrc location=rtsp://mediaserver:8554/{cam_id} latency=200 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=BGR ! sscape_timestamp_capture name=timesync ntp-server=ntpserv ! gvadetect model=/models/model.xml device={device} ! gvametaconvert add-tensor-data=true name=metaconvert ! sscape_post_inference_data_publish name=datapublisher ! appsink sync=true drop=true max-buffers=1"""
+PIPELINE_TEMPLATE = """rtspsrc location=rtsp://mediaserver:8554/{cam_id} latency=200 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=BGR ! sscape_timestamp_capture name=timesync ntp-server=ntpserv ! gvadetect name=detection model=/models/model.xml device={device} ! gvametaconvert add-tensor-data=true name=metaconvert ! sscape_post_inference_data_publish name=datapublisher ! appsink sync=true drop=true max-buffers=1"""
 
 
 def generate_pipeline(camera_ids, device="GPU", output_path=None):
@@ -51,6 +51,11 @@ def generate_pipeline(camera_ids, device="GPU", output_path=None):
             "element": {"name": "datapublisher", "property": "metadatagenpolicy"},
             "type": "string"
           },
+          "detection_device": {
+            "element": {"name": "detection", "property": "device"},
+            "type": "string",
+            "default": "{env[DETECTION_DEVICE]}"
+          },
           "detection_labels": {
             "element": {"name": "datapublisher", "property": "detection-labels"},
             "type": "string"
@@ -84,7 +89,7 @@ def main():
   parser.add_argument('--cameras', nargs='+', required=True,
                        help='Camera IDs (e.g., cam-1 cam-2 cam-3)')
   parser.add_argument('--device', default='GPU',
-                       choices=['GPU', 'CPU'],
+                       choices=['GPU', 'CPU', 'NPU'],
                        help='Inference device')
   parser.add_argument('--output', required=True,
                        help='Output pipeline JSON file')

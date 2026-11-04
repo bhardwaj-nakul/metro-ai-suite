@@ -30,6 +30,13 @@ read_env_var() {
     grep -E "^${key}=" .env | head -n1 | cut -d'=' -f2-
 }
 
+# Read a value from .env.example (trimmed); used as defaults before .env exists
+read_example_var() {
+    local key="$1"
+    [ -f ".env.example" ] || return 0
+    grep -E "^${key}=" .env.example | head -n1 | cut -d'=' -f2- | tr -d '[:space:]'
+}
+
 json_truthy() {
     jq -e '
         if type == "object" then
@@ -338,6 +345,7 @@ info "Locating DLStreamer GST plugins..."
 SCENESCAPE_PLUGINS_DIR="$SCRIPT_DIR/generated/scenescape-plugins"
 # SCENESCAPE_PLUGINS_REF selects the branch or tag for the gstplugins sparse clone independently of the image SCENESCAPE_IMAGE_TAG
 SCENESCAPE_PLUGINS_REF="${SCENESCAPE_PLUGINS_REF:-$(grep -E '^SCENESCAPE_PLUGINS_REF=' .env 2>/dev/null | head -n1 | cut -d'=' -f2-)}"
+SCENESCAPE_PLUGINS_REF="${SCENESCAPE_PLUGINS_REF:-$(read_example_var "SCENESCAPE_PLUGINS_REF")}"
 SCENESCAPE_PLUGINS_REF="${SCENESCAPE_PLUGINS_REF:-2026.2.0}"
 
 scenescape_valid() {
@@ -390,6 +398,24 @@ if lspci | grep -i "VGA.*Intel" >/dev/null 2>&1; then
 else
     warning "No Intel GPU detected - will use CPU inference"
     DEFAULT_DEVICE="CPU"
+fi
+
+# Manual override: exported DETECTION_DEVICE, else DETECTION_DEVICE in .env.example
+REQUESTED_DEVICE="${DETECTION_DEVICE:-}"
+if [ -z "$REQUESTED_DEVICE" ] && [ -f ".env.example" ]; then
+    REQUESTED_DEVICE=$(read_example_var "DETECTION_DEVICE")
+fi
+if [ -n "$REQUESTED_DEVICE" ]; then
+    REQUESTED_DEVICE=$(echo "$REQUESTED_DEVICE" | tr '[:lower:]' '[:upper:]')
+    case "$REQUESTED_DEVICE" in
+        GPU|CPU|NPU)
+            if [ "$REQUESTED_DEVICE" != "$DEFAULT_DEVICE" ]; then
+                info "Using DETECTION_DEVICE=$REQUESTED_DEVICE (overrides detected $DEFAULT_DEVICE)"
+            fi
+            DEFAULT_DEVICE="$REQUESTED_DEVICE"
+            ;;
+        *) warning "Unsupported DETECTION_DEVICE='$REQUESTED_DEVICE' (use GPU, CPU or NPU); falling back to detected device: $DEFAULT_DEVICE" ;;
+    esac
 fi
 
 # Discover scenes
@@ -484,12 +510,29 @@ done
 # Create/update .env file
 if [ ! -f ".env" ]; then
     info "Creating environment configuration..."
-    touch .env
+    if [ -f ".env.example" ]; then
+        # Seed from .env.example, skipping the placeholder password
+        grep -vE '^(#|[[:space:]]*$|DATABASE_PASSWORD=)' .env.example | sed 's/[[:space:]]*$//' > .env
+    else
+        touch .env
+    fi
+fi
+
+# HOST_IP: primary IPv4 of this machine (override by exporting HOST_IP)
+CURRENT_HOST_IP="${HOST_IP:-}"
+if [ -z "$CURRENT_HOST_IP" ]; then
+    CURRENT_HOST_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="src"){print $(i+1); exit}}')
+fi
+if [ -z "$CURRENT_HOST_IP" ]; then
+    CURRENT_HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 fi
 
 CURRENT_PUBLIC_HOSTNAME="${PUBLIC_HOSTNAME:-}"
 if [ -z "$CURRENT_PUBLIC_HOSTNAME" ]; then
     CURRENT_PUBLIC_HOSTNAME=$(read_env_var "PUBLIC_HOSTNAME")
+fi
+if [ -z "$CURRENT_PUBLIC_HOSTNAME" ]; then
+    CURRENT_PUBLIC_HOSTNAME="$CURRENT_HOST_IP"
 fi
 if [ -z "$CURRENT_PUBLIC_HOSTNAME" ]; then
     CURRENT_PUBLIC_HOSTNAME=$(hostname -f 2>/dev/null || hostname -s 2>/dev/null || true)
@@ -607,6 +650,7 @@ echo ""
 # Determine defaults for generated fields
 PRIMARY_DATASET=$(echo "${SCENES[0]}" | tr '[:upper:]' '[:lower:]')
 MODEL_NAME="${MODEL_NAME:-$(read_env_var "MODEL_NAME")}"
+MODEL_NAME="${MODEL_NAME:-$(read_example_var "MODEL_NAME")}"
 MODEL_NAME="${MODEL_NAME:-smartbuilding-int8}"
 
 # Download the detection model on demand from edge-ai-resources
@@ -650,13 +694,15 @@ delete_env_var "INTERNAL_BROKER_HOST"
 delete_env_var "INTERNAL_WEB_HOST"
 delete_env_var "INTERNAL_AUTOCALIBRATION_HOST"
 upsert_env_var "DATABASE_PASSWORD" "$CURRENT_DATABASE_PASSWORD"
-upsert_env_var "SCENESCAPE_IMAGE_TAG" "2026.2.0"
+upsert_env_var "SCENESCAPE_IMAGE_TAG" "${SCENESCAPE_IMAGE_TAG:-$(read_example_var "SCENESCAPE_IMAGE_TAG")}"
+upsert_env_var "DLSTREAMER_PIPELINE_SERVER_IMAGE" "${DLSTREAMER_PIPELINE_SERVER_IMAGE:-$(read_example_var "DLSTREAMER_PIPELINE_SERVER_IMAGE")}"
 upsert_env_var "SCENESCAPE_DIR" "$SCENESCAPE_DIR_INPUT"
 upsert_env_var "PRIMARY_SCENE" "${SCENES[0]}"
 upsert_env_var "PRIMARY_DATASET" "$PRIMARY_DATASET"
 upsert_env_var "MODEL_NAME" "$MODEL_NAME"
 upsert_env_var "DETECTION_DEVICE" "$DEFAULT_DEVICE"
 upsert_env_var "INFERENCE_DEVICE" "$DEFAULT_DEVICE"
+upsert_env_var "HOST_IP" "$CURRENT_HOST_IP"
 upsert_env_var "PUBLIC_HOSTNAME" "$CURRENT_PUBLIC_HOSTNAME"
 upsert_env_var "API_BASE_URL" "$CURRENT_API_BASE_URL"
 upsert_env_var "SCENESCAPE_UI_URL" "$CURRENT_SCENESCAPE_UI_URL"
@@ -677,7 +723,7 @@ success "Environment file ready"
 if [ ! -f "certs/scenescape-ca.pem" ] || [ ! -f "certs/django/secrets.py" ] || [ ! -f "certs/scenescape-autocalibration.crt" ] || [ ! -f "certs/scenescape-autocalibration.key" ] || [ ! -f "certs/calibration.auth" ]; then
     info "Generating TLS certificates and secrets..."
     chmod +x scripts/generate-certs.sh
-    DATABASE_PASSWORD="$CURRENT_DATABASE_PASSWORD" ./scripts/generate-certs.sh
+    HOST_IP="$CURRENT_HOST_IP" DATABASE_PASSWORD="$CURRENT_DATABASE_PASSWORD" ./scripts/generate-certs.sh
     success "Certificates and secrets generated"
 else
     if ! grep -q "^DATABASE_PASSWORD='${CURRENT_DATABASE_PASSWORD}'$" certs/django/secrets.py; then

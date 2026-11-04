@@ -10,6 +10,9 @@ RUN apt-get update \
     python3 \
     python3-pip \
     python3-venv \
+ && python3 -m pip install --break-system-packages --no-cache-dir --upgrade \
+     'certifi>=2026.10.18' \
+     'urllib3>=2.8.0' \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -m venv /opt/venv \
  && /opt/venv/bin/python -m pip install --no-cache-dir opencv-python-headless
