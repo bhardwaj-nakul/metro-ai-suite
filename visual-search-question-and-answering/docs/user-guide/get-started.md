@@ -116,11 +116,19 @@ Otherwise, if you would like to use your own data (images and video), make sure 
 
      Milvus/MinIO/etcd state now uses Docker named volumes by default. For cleanup/reset,
      use `source env.sh --clean-data` (this preserves `ov-models` and
-     `dataprep-yolox-models`).
+     `dataprep-detection-models`).
 
      Object detection is disabled by default, so only full frames are indexed. To
-     also embed detected object crops, set `DATA_INGEST_WITH_DETECT=true` before
-     running `env.sh`.
+     also embed detected object crops, set `DATA_INGEST_WITH_DETECT=true` and
+     `DATAPREP_DETECTION_MODEL` before running `env.sh`.
+     `DATAPREP_DETECTION_MODEL` takes a Hugging Face OpenVINO object-detection
+     model in `OpenVINO/<repo>` form, for example `OpenVINO/yolox_s-int8-ov`. It
+     has no default, so ingestion fails if detection is enabled without it. The
+     model is downloaded on first use and cached in the
+     `dataprep-detection-models` volume; licenses differ per model, so review the
+     model card before enabling it. Optionally set `DATAPREP_DETECTION_CLASSES`
+     to a comma-separated allowlist such as `person,car` to keep only those
+     classes.
 
    - **EMT-S**:
 

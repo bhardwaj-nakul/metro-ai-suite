@@ -132,6 +132,20 @@ multimodalDataprep:
     MM_DATAPREP_DETECTION_DEVICE: "CPU"
     MM_DATAPREP_USE_OPENVINO: "true"
     MM_DATAPREP_ENABLE_OBJECT_DETECTION: "false"
+    # Hugging Face OpenVINO detection model (OpenVINO/<repo>), for example
+    # OpenVINO/yolox_s-int8-ov. It has no default and is only required when
+    # MM_DATAPREP_ENABLE_OBJECT_DETECTION is "true". Licenses differ per model,
+    # so review the model card before enabling it.
+    MM_DATAPREP_DETECTION_MODEL_NAME: ""
+    # Optional comma-separated class allowlist for detected crops, for example
+    # "person,car". Empty keeps every class the detection model provides.
+    MM_DATAPREP_DETECTION_CLASSES: ""
+    # Cache downloaded detection models on the shared PVC mounted at
+    # /home/user/models so they survive pod restarts.
+    MM_DATAPREP_DETECTION_MODEL_DIR: "/home/user/models/object-detection"
+    # Fail an ingest job whose pipeline stops making progress for this many
+    # seconds instead of leaving it running forever. 0 disables the watchdog.
+    MM_DATAPREP_PIPELINE_STALL_TIMEOUT_S: 300
     MM_DATAPREP_FRAME_INTERVAL: 15
     MM_DATAPREP_VIDEO_SHM_BLOCK_SIZE: "6266880"
     # Keep the batch size well below MM_DATAPREP_VIDEO_SHM_MAX_BLOCKS so the

@@ -7,7 +7,7 @@ if [[ " $* " == *" --clean-data "* ]]; then
     export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vsqa}"
     _project="${COMPOSE_PROJECT_NAME}"
 
-    echo "Cleaning VSQA stack data for project '${_project}' (preserving ov-models and dataprep-yolox-models)..."
+    echo "Cleaning VSQA stack data for project '${_project}' (preserving ov-models and dataprep-detection-models)..."
 
     docker compose -f "${_script_dir}/compose_milvus.yaml" down --remove-orphans || true
     docker compose -f "${_script_dir}/../compose_milvus.yaml" down --remove-orphans || true
@@ -15,14 +15,14 @@ if [[ " $* " == *" --clean-data "* ]]; then
     while IFS= read -r _vol; do
         [[ -z "${_vol}" ]] && continue
         case "${_vol}" in
-            *_ov-models|*_dataprep-yolox-models)
+            *_ov-models|*_dataprep-detection-models)
                 continue
                 ;;
         esac
         docker volume rm "${_vol}" >/dev/null 2>&1 || true
     done < <(docker volume ls --filter "label=com.docker.compose.project=${_project}" --format '{{.Name}}')
 
-    echo "Clean complete. Preserved Docker volumes: ov-models, dataprep-yolox-models"
+    echo "Clean complete. Preserved Docker volumes: ov-models, dataprep-detection-models"
     if return 0 2>/dev/null; then
         return 0
     fi
@@ -53,6 +53,18 @@ export MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
 export MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
 
 export DATA_INGEST_WITH_DETECT="${DATA_INGEST_WITH_DETECT:-false}"
+# Hugging Face OpenVINO object-detection model (OpenVINO/<repo>) used to crop
+# objects out of frames, for example OpenVINO/yolox_s-int8-ov. It has no default
+# and is only required when DATA_INGEST_WITH_DETECT is true. The model is
+# downloaded on first use into the dataprep-detection-models volume; review the
+# model card, since licenses differ per model.
+export DATAPREP_DETECTION_MODEL="${DATAPREP_DETECTION_MODEL:-}"
+# Optional comma-separated class allowlist for detected crops, for example
+# "person,car". Empty keeps every class the detection model provides.
+export DATAPREP_DETECTION_CLASSES="${DATAPREP_DETECTION_CLASSES:-}"
+# Fail an ingest job whose pipeline stops making progress for this many seconds
+# instead of leaving it running forever. Set to 0 to disable the watchdog.
+export DATAPREP_PIPELINE_STALL_TIMEOUT_S="${DATAPREP_PIPELINE_STALL_TIMEOUT_S:-300}"
 export DATA_INGEST_FRAME_INTERVAL="${DATA_INGEST_FRAME_INTERVAL:-15}"
 export DATAPREP_NOFILE_SOFT="${DATAPREP_NOFILE_SOFT:-65535}"
 export DATAPREP_NOFILE_HARD="${DATAPREP_NOFILE_HARD:-65535}"

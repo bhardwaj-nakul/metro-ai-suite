@@ -131,6 +131,9 @@ global:
 | Key | Description | Default |
 | --- | ----------- | ------- |
 | `multimodalDataprep.env.MM_DATAPREP_ENABLE_OBJECT_DETECTION` | Also embed detected object crops in addition to full frames | `"false"` |
+| `multimodalDataprep.env.MM_DATAPREP_DETECTION_MODEL_NAME` | Hugging Face OpenVINO object-detection model in `OpenVINO/<repo>` form, for example `OpenVINO/yolox_s-int8-ov`. Required when object detection is enabled; licenses differ per model, so review the model card | `""` |
+| `multimodalDataprep.env.MM_DATAPREP_DETECTION_CLASSES` | Comma-separated class allowlist for detected crops, for example `person,car`. Empty keeps every class | `""` |
+| `multimodalDataprep.env.MM_DATAPREP_PIPELINE_STALL_TIMEOUT_S` | Fail an ingest job whose pipeline stops making progress for this many seconds. `0` disables the watchdog | `300` |
 | `visualSearchQaApp.env.DATA_INGEST_WITH_DETECT` | App-side request for the above. Keep both in sync | `false` |
 | `visualSearchQaApp.env.DATAPREP_PUBLIC_BASE_URL` | Browser-reachable dataprep address used to stream search results. Leave blank when the browser can reach the cluster service directly | `""` |
 | `*.env.HF_ENDPOINT` | Hugging Face mirror used to download models. Set to `https://huggingface.co` outside mainland China | `https://hf-mirror.com` |

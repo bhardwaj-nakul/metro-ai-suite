@@ -19,6 +19,16 @@
     keeps search results free of crop duplicates. Set
     `MM_DATAPREP_ENABLE_OBJECT_DETECTION` and `DATA_INGEST_WITH_DETECT` to
     enable it.
+  - Object detection now uses Hugging Face OpenVINO models. Set
+    `DATAPREP_DETECTION_MODEL` (Helm `MM_DATAPREP_DETECTION_MODEL_NAME`) to an
+    `OpenVINO/<repo>` object-detection model such as `OpenVINO/yolox_s-int8-ov`.
+    It has no default and is required whenever object detection is enabled. The
+    optional `DATAPREP_DETECTION_CLASSES` keeps only the listed classes.
+    Downloaded models are cached in the `dataprep-detection-models` volume; the
+    former `dataprep-yolox-models` volume is no longer used and can be removed.
+  - Added `DATAPREP_PIPELINE_STALL_TIMEOUT_S` (default 300s), which fails an
+    ingest job whose pipeline stops making progress instead of leaving it
+    running indefinitely. Set it to 0 to disable the watchdog.
 
 - Helm Chart:
 

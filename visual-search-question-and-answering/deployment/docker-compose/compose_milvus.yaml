@@ -192,6 +192,12 @@ services:
       - MM_DATAPREP_USE_OPENVINO=true
       - MM_DATAPREP_OV_MODELS_DIR=/app/ov_models
       - MM_DATAPREP_ENABLE_OBJECT_DETECTION=${DATA_INGEST_WITH_DETECT:-false}
+      # Hugging Face OpenVINO detection model (OpenVINO/<repo>), for example
+      # OpenVINO/yolox_s-int8-ov. Required only when object detection is on.
+      - MM_DATAPREP_DETECTION_MODEL_NAME=${DATAPREP_DETECTION_MODEL:-}
+      # Optional comma-separated class allowlist, for example "person,car".
+      # Empty keeps every class the model provides.
+      - MM_DATAPREP_DETECTION_CLASSES=${DATAPREP_DETECTION_CLASSES:-}
       - MM_DATAPREP_FRAME_INTERVAL=${DATA_INGEST_FRAME_INTERVAL:-15}
       # Quick guardrails for host FD pressure in high-throughput video ingest.
       - MM_DATAPREP_MAX_PARALLEL_WORKERS=${MM_DATAPREP_MAX_PARALLEL_WORKERS:-2}
@@ -201,6 +207,9 @@ services:
       - MM_DATAPREP_VIDEO_FRAME_DECODER_WORKERS=${MM_DATAPREP_VIDEO_FRAME_DECODER_WORKERS:-1}
       - MM_DATAPREP_DETECTION_WORKER_THREADS=${MM_DATAPREP_DETECTION_WORKER_THREADS:-1}
       - MM_DATAPREP_EMBED_WORKER_THREADS=${MM_DATAPREP_EMBED_WORKER_THREADS:-1}
+      # Fail a stalled ingest instead of leaving the job running forever when a
+      # pipeline stage stops making progress. 0 disables the watchdog.
+      - MM_DATAPREP_PIPELINE_STALL_TIMEOUT_S=${DATAPREP_PIPELINE_STALL_TIMEOUT_S:-300}
       # The media directory is shared with the UI: ingest paths are resolved
       # under this root and source_path is recorded in host terms.
       - MM_DATAPREP_INGEST_DATA_ROOT=/home/user/data
@@ -243,7 +252,7 @@ services:
     volumes:
       - ov-models:/home/appuser/.cache/huggingface
       - ov-models:/app/ov_models
-      - dataprep-yolox-models:/app/models/yolox
+      - dataprep-detection-models:/app/models/object-detection
       - dataprep-data:/tmp/dataprep
       - ${HOST_DATA_PATH}:/home/user/data:ro
 
@@ -336,7 +345,7 @@ volumes:
   milvus-etcd-data:
   milvus-minio-data:
   milvus-data:
-  dataprep-yolox-models:
+  dataprep-detection-models:
   dataprep-data:
 
 networks:
