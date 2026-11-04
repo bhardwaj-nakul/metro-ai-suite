@@ -73,7 +73,7 @@ mkdir -p $HOME/data
 If you would like to test the application with a demo dataset, please continue and follow the instructions in the
 [Try with a demo dataset](#try-with-a-demo-dataset) section later in this guide.
 
-Otherwise, if you would like to use your own data (images and video), make sure to put them all in the created data directory (`$HOME/data` in the example commands above) and make sure the created path matches with the `HOST_DATA_PATH` variable in `deployment/docker-compose/env.sh` BEFORE deploying the services.
+Otherwise, if you would like to use your own data (images and video), put it all in a directory on the host and point `HOST_DATA_PATH` at it before deploying the services, for example `export HOST_DATA_PATH="$HOME/data"`. It defaults to `$HOME/data`.
 
 > [!NOTE]
 > Supported media types are jpg, png, and mp4.
@@ -107,12 +107,57 @@ Otherwise, if you would like to use your own data (images and video), make sure 
      > [Supported models](https://docs.openedgeplatform.intel.com/dev/edge-ai-libraries/multimodal-embedding-serving/supported-models.html) for Multimodal Embedding Serving for available embedding models, and
      > [Supported models](https://github.com/open-edge-platform/edge-ai-libraries/blob/release-2026.2.0/microservices/vlm-openvino-serving/docs/user-guide/Overview.md#models-supported) for VLM OpenVINO for available VLM models.
 
-     You might want to pay some attention to `VLM_DEVICE`, `EMBEDDING_DEVICE`,
-     `MM_DATAPREP_EMBEDDING_DEVICE` and `MM_DATAPREP_DETECTION_DEVICE` in `env.sh`.
-     By default, they are `GPU.1`, which applies to a standard hardware platform
-     with an integrated GPU as `GPU.0` and a discrete GPU as `GPU.1`. You can
-     refer to [OpenVINO's query device sample](https://docs.openvino.ai/2024/learn-openvino/openvino-samples/hello-query-device.html)
-     to learn more about how to identify which GPU index should be set.
+     `env.sh` only sets a variable when it is not already exported, so anything
+     you export beforehand wins. Besides the two model names, the settings most
+     often changed are:
+
+     | Variable | Purpose | Default |
+     | --- | --- | --- |
+     | `HOST_DATA_PATH` | Host directory holding the media to index, mounted into the services | `$HOME/data` |
+     | `HF_ENDPOINT` | Hugging Face endpoint used to download models | `https://hf-mirror.com` |
+     | `VLM_COMPRESSION_WEIGHT_FORMAT` | VLM weight precision, for example `int4` to reduce memory | `int8` |
+
+     > [!IMPORTANT]
+     > `HF_ENDPOINT` defaults to a mirror intended for mainland China. Set
+     > `export HF_ENDPOINT="https://huggingface.co"` to download models from
+     > Hugging Face directly.
+
+     Each microservice picks its inference device independently, so that bulk
+     ingestion and interactive queries do not have to share one accelerator:
+
+     | Variable | Microservice | Default |
+     | --- | --- | --- |
+     | `VLM_DEVICE` | `vlm-openvino-serving`, question answering | `GPU` |
+     | `EMBEDDING_DEVICE` | `multimodal-embedding-serving`, query embedding | `CPU` |
+     | `DATAPREP_EMBEDDING_DEVICE` | `multimodal-dataprep`, ingest embedding | `GPU` |
+     | `DATAPREP_DETECTION_DEVICE` | `multimodal-dataprep`, object detection | `GPU` |
+
+     Each accepts `CPU`, `GPU` or `NPU`. The ingest pipeline is the throughput
+     bottleneck, so it takes the GPU by default, while query embedding is a
+     single short request per search and runs on the CPU. Avoid placing the
+     embedding model on the same GPU for both services unless it has memory to
+     spare: two copies of a large model, such as `CLIP/clip-vit-h-14`, can
+     exhaust the device and the next query then fails with
+     `CL_OUT_OF_RESOURCES`.
+
+     `GPU` selects the first GPU that OpenVINO reports. On a platform with an
+     integrated GPU as `GPU.0` and a discrete GPU as `GPU.1`, name the one you
+     want explicitly. Refer to
+     [OpenVINO's query device sample](https://docs.openvino.ai/2024/learn-openvino/openvino-samples/hello-query-device.html)
+     to list the available indices. For example, to run everything on the CPU:
+
+     ``` bash
+     export VLM_DEVICE=CPU
+     export EMBEDDING_DEVICE=CPU
+     export DATAPREP_EMBEDDING_DEVICE=CPU
+     export DATAPREP_DETECTION_DEVICE=CPU
+     ```
+
+     > [!NOTE]
+     > `MM_DATAPREP_EMBEDDING_DEVICE` and `MM_DATAPREP_DETECTION_DEVICE` are the
+     > previous names of the two dataprep variables and are still honoured, so
+     > existing scripts keep working. `DATAPREP_*` takes precedence if both are
+     > set.
 
      Milvus/MinIO/etcd state now uses Docker named volumes by default. For cleanup/reset,
      use `source env.sh --clean-data` (this preserves `ov-models` and

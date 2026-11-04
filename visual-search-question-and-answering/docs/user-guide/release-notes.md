@@ -42,10 +42,30 @@
   - Added `global.nodeSelector` to pin the pods to the node that holds the
     host data path and the accelerator devices.
 
+- Deployment:
+
+  - Inference devices are now selected per microservice in Docker Compose
+    instead of being derived from `EMBEDDING_DEVICE`. Setting a GPU for query
+    embedding no longer moves the ingest pipeline onto the same device, where
+    two copies of a large embedding model could exhaust it and make queries
+    fail with `CL_OUT_OF_RESOURCES`.
+  - The dataprep devices are now set with `DATAPREP_EMBEDDING_DEVICE` and
+    `DATAPREP_DETECTION_DEVICE`, matching the other `DATAPREP_*` settings. The
+    previous `MM_DATAPREP_*` names are still honoured.
+  - Device defaults are now `CPU` for query embedding and `GPU` for the VLM and
+    the ingest pipeline. The previous `GPU.1` default did not exist on
+    platforms with a single GPU.
+
 - Documentation:
 
   - Documented device selection, device plugin resources, device group ids,
     node pinning, and the corresponding troubleshooting steps for Helm.
+  - Documented the per-service device variables, their defaults, and the
+    single-GPU contention caveat for Docker Compose.
+  - Documented `HOST_DATA_PATH`, `HF_ENDPOINT` and
+    `VLM_COMPRESSION_WEIGHT_FORMAT` in the Compose guide. `HF_ENDPOINT`
+    defaults to a mirror intended for mainland China and has to be overridden
+    to download models from Hugging Face directly.
   - VLM OpenVINO Serving is now consumed as a published image instead of being
     built from source.
 

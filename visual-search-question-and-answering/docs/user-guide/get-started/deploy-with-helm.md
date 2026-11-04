@@ -83,6 +83,14 @@ Each service picks its own device. `CPU` works everywhere and is the default.
 | `multimodalDataprep.env.MM_DATAPREP_EMBEDDING_DEVICE` | Device for ingest embedding | `CPU`, `GPU`, `NPU` |
 | `multimodalDataprep.env.MM_DATAPREP_DETECTION_DEVICE` | Device for object detection | `CPU`, `GPU`, `NPU` |
 
+Prefer splitting the work rather than pointing query embedding and ingest
+embedding at the same GPU. If both pods are scheduled on a node with a single
+GPU, two copies of a large embedding model, such as `CLIP/clip-vit-h-14`, can
+exhaust the device and queries then fail with `CL_OUT_OF_RESOURCES`. Ingestion
+is the throughput bottleneck, so it is usually the one worth accelerating,
+while query embedding is a single short request per search and runs acceptably
+on the CPU.
+
 When a service is set to `GPU` or `NPU` you must also request the matching
 device-plugin resource for it, otherwise OpenVINO fails at startup with
 `[GPU] Can't get PERFORMANCE_HINT property as no supported devices found`.

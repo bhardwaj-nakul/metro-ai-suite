@@ -93,14 +93,32 @@ export INDEX_NAME="${INDEX_NAME:-default}"
 # export HF_ENDPOINT=https://huggingface.co
 export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 
-export VLM_DEVICE="${VLM_DEVICE:-GPU.1}"
+export VLM_DEVICE="${VLM_DEVICE:-GPU}"
 export HOST_DATA_PATH="${HOST_DATA_PATH:-$HOME/data}"
 # export VLM_MODEL_NAME="Qwen/Qwen2.5-VL-7B-Instruct"
 
 # OpenVINO configuration
-export EMBEDDING_DEVICE="${EMBEDDING_DEVICE:-GPU.1}"
-export MM_DATAPREP_EMBEDDING_DEVICE="${MM_DATAPREP_EMBEDDING_DEVICE:-${EMBEDDING_DEVICE:-GPU.1}}"
-export MM_DATAPREP_DETECTION_DEVICE="${MM_DATAPREP_DETECTION_DEVICE:-${EMBEDDING_DEVICE:-GPU.1}}"
+#
+# Each microservice selects its inference device independently, so bulk ingest
+# and interactive queries do not have to share one accelerator. Loading the
+# same large embedding model on both multimodal-embedding-serving and
+# multimodal-dataprep at once can exhaust a single GPU, which surfaces as
+# CL_OUT_OF_RESOURCES on the first query after an ingest.
+#
+# multimodal-embedding-serving only embeds the query itself, which is one
+# short request per search, so it defaults to CPU and leaves the GPU to the
+# ingest pipeline. Set it to GPU or NPU if you have capacity to spare.
+export EMBEDDING_DEVICE="${EMBEDDING_DEVICE:-CPU}"
+# Devices for the multimodal-dataprep ingest pipeline, which is the throughput
+# bottleneck and therefore defaults to GPU. MM_DATAPREP_EMBEDDING_DEVICE and
+# MM_DATAPREP_DETECTION_DEVICE are the previous names and are still honoured.
+# "GPU" is the first GPU OpenVINO reports; on a platform with both an
+# integrated and a discrete GPU, select the discrete one explicitly with
+# "GPU.1". See OpenVINO's query device sample to list the available indices.
+export DATAPREP_EMBEDDING_DEVICE="${DATAPREP_EMBEDDING_DEVICE:-${MM_DATAPREP_EMBEDDING_DEVICE:-GPU}}"
+export DATAPREP_DETECTION_DEVICE="${DATAPREP_DETECTION_DEVICE:-${MM_DATAPREP_DETECTION_DEVICE:-GPU}}"
+export MM_DATAPREP_EMBEDDING_DEVICE="${DATAPREP_EMBEDDING_DEVICE}"
+export MM_DATAPREP_DETECTION_DEVICE="${DATAPREP_DETECTION_DEVICE}"
 export EMBEDDING_USE_OV=true
 
 export VLM_COMPRESSION_WEIGHT_FORMAT="${VLM_COMPRESSION_WEIGHT_FORMAT:-int8}"
