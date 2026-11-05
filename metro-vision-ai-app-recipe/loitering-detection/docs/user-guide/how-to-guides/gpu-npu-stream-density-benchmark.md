@@ -46,18 +46,18 @@ cd metro-ai-suite/metro-vision-ai-app-recipe/
 
 ### Example Results (GPU Only)
 
-- **Achieved Stream density (GPU only)**: `Stream Density(GPU) = 11` streams at >= 28.5 frames per second
-- **Throughput min** at achieved stream density: `29.8922`
-- **Throughput average** at achieved stream density: `29.9371`
-- **Throughput median** at achieved stream density: `29.9122`
-- **Throughput cumulative** at achieved stream density: `329.308`
+- **Achieved Stream density (GPU only)**: `Stream Density(GPU) = 10` streams at >= 28.5 frames per second
+- **Throughput min** at achieved stream density: `29.7122`
+- **Throughput average** at achieved stream density: `29.7943`
+- **Throughput median** at achieved stream density: `29.7772`
+- **Throughput cumulative** at achieved stream density: `297.943`
 
 For detailed metric definitions and KPI interpretation, refer to
 [Benchmark Performance](./benchmark.md).
 
 ### Hardware Behavior Notes (GPU Only)
 
-- **Observation at achieved stream density**: At 11 streams, the benchmark remained stable
+- **Observation at achieved stream density**: At 10 streams, the benchmark remained stable
   above target FPS while GPU engines showed sustained high activity in the inference and
   media path.
 - **Observed GPU telemetry from [qmassa](https://github.com/ulissesf/qmassa/tree/main/qmassa)
@@ -76,7 +76,7 @@ For detailed metric definitions and KPI interpretation, refer to
 
 ### Part 1 Section Summary
 
-- **Standalone GPU ceiling**: `Stream Density(GPU)(11)` at target FPS.
+- **Standalone GPU ceiling**: `Stream Density(GPU)(10)` at target FPS.
 - **Hardware takeaway**: GPU engines carry primary inference/media load (see Fig. 1), while
   CPU is mainly utilized for host-side data-feeding tasks (see Fig. 2).
 
@@ -114,18 +114,18 @@ cd metro-ai-suite/metro-vision-ai-app-recipe/
 
 ### Example Results (NPU Only)
 
-- **Achieved Stream density (NPU only)**: `Stream Density(NPU) = 5` streams at >= 28.5 FPS
-- **Throughput min** at achieved stream density: `28.5518`
-- **Throughput average** at achieved stream density: `28.6221`
-- **Throughput median** at achieved stream density: `28.6302`
-- **Throughput cumulative** at achieved stream density: `143.111`
+- **Achieved Stream density (NPU only)**: `Stream Density(NPU) = 4` streams at >= 28.5 FPS
+- **Throughput min** at achieved stream density: `30.0365`
+- **Throughput average** at achieved stream density: `30.0505`
+- **Throughput median** at achieved stream density: `30.0481`
+- **Throughput cumulative** at achieved stream density: `120.202`
 
 For detailed metric definitions and KPI interpretation, refer to
 [Benchmark Performance](./benchmark.md).
 
 ### Hardware Behavior Notes (NPU Only)
 
-- **Observation at achieved stream density**: At 5 streams, the NPU run remained stable above
+- **Observation at achieved stream density**: At 4 streams, the NPU run remained stable above
   target FPS while the accelerator showed sustained activity.
 - **Observed NPU telemetry from** [npu-monitor-tool](https://github.com/open-edge-platform/edge-ai-libraries/tree/main/tools/npu-monitor-tool)
   **at achieved stream density**: `NPU Utilization: 42%` (see Fig. 3).
@@ -139,7 +139,7 @@ For detailed metric definitions and KPI interpretation, refer to
 
 ### Part 2 Section Summary
 
-- **Standalone NPU ceiling**: `Stream Density(NPU)(5)` at target FPS.
+- **Standalone NPU ceiling**: `Stream Density(NPU)(4)` at target FPS.
 - **Hardware takeaway**: NPU carries inference load (see Fig. 3), and GPU decode/frame-handling
   activity (`VCS`/`VECS`) remains part of the end-to-end path (see Fig. 4).
 
@@ -166,8 +166,8 @@ This section evaluates the best performance when **GPU and NPU pipelines run sim
   NPU run together more smoothly, keeps GPU power behavior in a safe range, and helps achieve
   higher overall stream density.
 
-- Backoff application for this run: `Stream Density(GPU) = 11 - 1 = 10` and
-  `Stream Density(NPU) = 5 - 2 = 3`, so the combined test uses 10 GPU streams and 3 NPU
+- Backoff application for this run: `Stream Density(GPU) = 10 - 1 = 9` and
+  `Stream Density(NPU) = 4 - 2 = 2`, so the combined test uses 9 GPU streams and 2 NPU
   streams.
 
 > **Note:** In this document, `GPU!NPU` is shorthand for the combined run (GPU and NPU
@@ -175,38 +175,38 @@ This section evaluates the best performance when **GPU and NPU pipelines run sim
 
 ### Run the Combined Stream Density Benchmark
 
-Run the combined workflow with 10 GPU streams and 3 NPU streams, using **nstreams** mode from
+Run the combined workflow with 9 GPU streams and 2 NPU streams, using **nstreams** mode from
 [Benchmark Performance](./benchmark.md):
 
 ```bash
 # Navigate to the metro-vision-ai-app-recipe directory
 cd metro-ai-suite/metro-vision-ai-app-recipe/
 
-# Run GPU and NPU pipelines simultaneously with fixed stream counts: 10 GPU streams and 3 NPU streams, target >= 28.5 FPS
-./calc_stream_density.sh -p object_tracking_gpu object_tracking_npu -nstreams 10 3 -t 28.5
+# Run GPU and NPU pipelines simultaneously with fixed stream counts: 9 GPU streams and 2 NPU streams, target >= 28.5 FPS
+./calc_stream_density.sh -p object_tracking_gpu object_tracking_npu -nstreams 9 2 -t 28.5
 ```
 
 ### Example Results (GPU!NPU)
 
 | Symbol                  |   Value | Notes                                              |
 | ----------------------- | ------: | -------------------------------------------------- |
-| Stream Density(GPU)     |      11 | GPU-only peak stream density                       |
-| Stream Density(NPU)     |       5 | NPU-only peak stream density                       |
-| Stream Density(GPU!NPU) |      13 | Combined run with 10 GPU streams and 3 NPU streams |
-| Throughput median       | 29.1743 | Combined run KPI                                   |
-| Throughput average      | 29.1352 | Combined run KPI                                   |
-| Throughput cumulative   | 378.757 | Combined run KPI                                   |
-| Throughput min          | 28.7297 | Combined run KPI                                   |
+| Stream Density(GPU)     |      10 | GPU-only peak stream density                       |
+| Stream Density(NPU)     |       4 | NPU-only peak stream density                       |
+| Stream Density(GPU!NPU) |      11 | Combined run with 9 GPU streams and 2 NPU streams  |
+| Throughput median       | 29.9103 | Combined run KPI                                   |
+| Throughput average      | 29.9295 | Combined run KPI                                   |
+| Throughput cumulative   | 329.224 | Combined run KPI                                   |
+| Throughput min          | 29.8549 | Combined run KPI                                   |
 
 For detailed metric definitions and KPI interpretation, refer to
 [Benchmark Performance](./benchmark.md).
 
 ### Part 3 Section Summary
 
-- **Combined stream density**: `Stream Density(GPU!NPU)(13)`
-- **GPU stream share**: `10`
-- **NPU stream share**: `3`
-- **Final comparison**: `Stream Density(GPU!NPU)(13) > Stream Density(GPU)(11) > Stream Density(NPU)(5)`
+- **Combined stream density**: `Stream Density(GPU!NPU)(11)`
+- **GPU stream share**: `9`
+- **NPU stream share**: `2`
+- **Final comparison**: `Stream Density(GPU!NPU)(11) > Stream Density(GPU)(10) > Stream Density(NPU)(4)`
 
 **Figure reference**: Combined GPU telemetry is shown in Fig. 5 and combined NPU telemetry is
 shown in Fig. 6.
@@ -226,12 +226,12 @@ _Fig. 6: Combined NPU telemetry (npu-monitor-tool) at 3 NPU streams_
 ## Conclusion
 
 - [Part 1 Section Summary](#part-1-section-summary) establishes the standalone GPU baseline at
-  `Stream Density(GPU)(11)`.
+  `Stream Density(GPU)(10)`.
 - [Part 2 Section Summary](#part-2-section-summary) establishes the standalone NPU baseline at
-  `Stream Density(NPU)(5)` and confirms continued GPU decode/frame-handling involvement
+  `Stream Density(NPU)(4)` and confirms continued GPU decode/frame-handling involvement
   (`VCS`/`VECS`).
 - [Part 3 Section Summary](#part-3-section-summary) shows the combined result
-  `Stream Density(GPU!NPU)(13)` with 10 GPU streams and 3 NPU streams.
+  `Stream Density(GPU!NPU)(11)` with 9 GPU streams and 2 NPU streams.
 
 Overall, **NPU offloading provides clear system-level value addition** for Loitering Detection.
 Applying a tuned backoff (for example, 1 GPU stream and 2 NPU streams on this platform) creates

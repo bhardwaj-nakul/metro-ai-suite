@@ -9,6 +9,10 @@ performance level.
 
 - The `metro-ai-suite` repository must be cloned to your system.
 - `curl`, `jq`, `gawk`, `ffmpeg`, and `bc` utilities installed
+- Docker with the `docker compose` plugin installed.
+- The application must be installed with `./install.sh <app-name>` (e.g.,
+`./install.sh loitering-detection`). Do **not** run `docker compose up`; the benchmark script
+starts and stops the application stack itself.
 
 ## Step 1: Understand the Benchmarking Script
 
@@ -16,6 +20,19 @@ The core of the benchmarking process is the `calc_stream_density.sh` script, loc
 `metro-vision-ai-app-recipe/` directory. This script automates the process of starting video
 streams, monitoring their performance (Frames Per Second - FPS), and calculating key
 performance indicators (KPIs) to find the maximum sustainable stream density.
+
+### Fresh Application Stack per Round
+
+The script manages the application lifecycle itself, so each benchmark round starts from a clean
+state:
+
+- Before benchmarking, it runs `docker compose down -v` to clear any running stack.
+- At the start of every round (every stream count tested), it runs `docker compose up -d` and
+waits until the DL Streamer Pipeline Server is ready (timeout set by the
+`COMPOSE_READY_TIMEOUT` environment variable, default 300 seconds).
+- At the end of every round, it stops the pipelines and runs `docker compose down -v
+--remove-orphans`.
+- If the script is interrupted (Ctrl+C), the stack is also brought down.
 
 ### Stream Density Logic
 
@@ -96,24 +113,25 @@ inference-region=0 inference-interval=3 batch-size=8 nireq=2 ie-config="GPU_THRO
 
 ## Step 2: Prepare for Benchmarking
 
-1.  **Set Up and Start the Application:** Before running the benchmark, you must set up and
-start the desired application (e.g., Loitering Detection). This ensures all services,
-including the DL Streamer Pipeline Server, are running and available. For setup instructions,
-please refer to the `get-started.md` guide located in the specific application's documentation
-folder (e.g., [Get Started for Loitering Detection](../get-started.md)).
-
-2.  **Navigate to Script Directory:** Open a terminal and navigate to the `metro-vision-ai-app-recipe` directory.
+1.  **Navigate to Script Directory:** Open a terminal and navigate to the `metro-vision-ai-app-recipe` directory.
 
     ```bash
     cd metro-ai-suite/metro-vision-ai-app-recipe/
     ```
 
-3.  **Stop Existing Pipelines:** Ensure no other pipelines are running before you start the
-benchmark. You can stop any running pipelines with the `sample_stop.sh` script.
+2.  **Install the Application:** Follow the `get-started.md` guide for the application
+(e.g., [Get Started for Loitering Detection](../get-started.md)) **only up to and including**
+the `./install.sh` step. This downloads the models and videos and generates the `.env` and
+`docker-compose.yml` files used by the benchmark.
 
     ```bash
-    ./sample_stop.sh
+    ./install.sh loitering-detection
     ```
+
+    > [!NOTE]
+    > Do not run `docker compose up` or `./sample_start.sh`. The `calc_stream_density.sh`
+    > script runs `docker compose up` and `docker compose down` for every benchmark round.
+    > Any stack that is already running is brought down when the benchmark starts.
 
 ## Step 3: Run the Benchmark
 
@@ -246,11 +264,13 @@ throughput min: 27.2
 
 ## Step 4: Stop the Benchmark
 
-After the benchmark is complete, or if you need to stop it manually, use the `sample_stop.sh`
-script. This will delete all running pipeline instances.
+The script brings the application stack down (`docker compose down`) after every round,
+including the last one, and also when it is interrupted with Ctrl+C. No manual cleanup is
+needed. If the script was terminated abnormally (e.g., `kill -9`), bring the stack down
+manually:
 
 ```bash
-./sample_stop.sh
+docker compose down -v --remove-orphans
 ```
 
 ---

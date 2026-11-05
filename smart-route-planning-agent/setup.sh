@@ -91,6 +91,9 @@ export DATA_RETENTION_HOURS=${DATA_RETENTION_HOURS:-24}
 # AI Route Planner Configuration
 export AI_ROUTE_PLANNER_PORT=${AI_ROUTE_PLANNER_PORT:-7864}
 
+# Intersections API Configuration (host port exposing GET /v1/intersections)
+export INTERSECTIONS_API_PORT=${INTERSECTIONS_API_PORT:-8765}
+
 # Reasoning Model Configuration (optional)
 export REASONING_MODEL_NAME=${REASONING_MODEL_NAME:-}
 # Timeout (seconds) for the reasoning model HTTP request. Increase for larger models
@@ -140,6 +143,7 @@ start_service() {
     if docker compose -f "$COMPOSE_MAIN" -p "$PROJECT_NAME" up -d; then
         echo -e "${GREEN}Smart-Route-Planning-Agent container started successfully!${NC}"
         echo -e "${BLUE}AI Route Planner UI: ${YELLOW}http://${HOST_IP}:${AI_ROUTE_PLANNER_PORT}${NC}"
+        echo -e "${BLUE}Intersections API: ${YELLOW}http://${HOST_IP}:${INTERSECTIONS_API_PORT}/v1/intersections${NC}"
     else
         echo -e "${RED}Failed to start Smart-Route-Planning-Agent container!${NC}"
         return 1

@@ -10,6 +10,7 @@ services:
     image: intel/smart-route-planning-agent:${TAG:-latest}
     ports:
       - "${AI_ROUTE_PLANNER_PORT:-7864}:7860"
+      - "${INTERSECTIONS_API_PORT:-8765}:8765"
     environment:
       - http_proxy=${http_proxy}
       - https_proxy=${https_proxy}
@@ -19,6 +20,7 @@ services:
       - NO_PROXY=${no_proxy},${HOST_IP},ovms
       - REASONING_MODEL_NAME=${REASONING_MODEL_NAME:-}  # Optional. When empty, rule based planning is used.
       - REASONING_TIMEOUT_SEC=${REASONING_TIMEOUT_SEC:-15.0}  # Increase for larger reasoning models (e.g. 60-120s for 14B on CPU).
+      - INTERSECTIONS_API_PORT=8765
     volumes:
       - ./data/config.json:/app/data/config.json:ro
     networks:
@@ -27,12 +29,25 @@ services:
       ovms:
         condition: service_healthy
         required: false
+      metrics-manager:
+        condition: service_started
     healthcheck:
       test: ["CMD", "uv", "run", "health_check.py", "7860"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+    restart: unless-stopped
+
+  # Provides Intel hardware info (CPU / GPU / NPU) shown at the top of the UI.
+  metrics-manager:
+    image: intel/metrics-manager:2026.2.0
+    privileged: true
+    volumes:
+      - /sys:/sys
+      - /dev:/dev
+    networks:
+      - routeplanner
     restart: unless-stopped
 
   ovms:
@@ -67,6 +82,10 @@ services:
       - ovms-models:/home/ovms
     networks:
       - routeplanner
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 65536
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/v2/health/ready"]
       interval: 15s

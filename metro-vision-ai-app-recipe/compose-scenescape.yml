@@ -129,10 +129,10 @@ services:
     environment:
       http_proxy: ${http_proxy}
       https_proxy: ${https_proxy}
-      no_proxy: ${no_proxy},.scenescape.intel.com,influxdb2
+      no_proxy: ${no_proxy},.scenescape.intel.com,influxdb2,prometheus
       HTTP_PROXY: ${http_proxy}
       HTTPS_PROXY: ${https_proxy}
-      NO_PROXY: ${no_proxy},.scenescape.intel.com,influxdb2
+      NO_PROXY: ${no_proxy},.scenescape.intel.com,influxdb2,prometheus
       GF_SERVER_ROOT_URL: https://localhost/grafana/
       GF_SERVER_SERVE_FROM_SUB_PATH: true
       GF_PANELS_DISABLE_SANITIZE_HTML: true
@@ -260,6 +260,7 @@ services:
       - EXAMPLEDB=/home/scenescape/Scenescape/${SS_SCENE_DB:-smart-intersection-ri.tar.bz2}
       - DBHOST=pgserver
       - DBPORT=5432
+      - SCENESCAPE_ALLOWED_HOSTS=${HOST_IP}
     command: >
       webserver
       --dbtype postgres
@@ -267,7 +268,7 @@ services:
       --brokerauth /run/secrets/browser.auth
       --brokerrootcert /run/secrets/certs/scenescape-ca.pem
     healthcheck:
-      test: "curl --insecure -X GET https://web.scenescape.intel.com:443/api/v1/database-ready | grep 'true'"
+      test: "curl --insecure -X GET https://localhost:443/api/v1/database-ready | grep 'true'"
       interval: 10s
       timeout: 120s
       retries: 10
@@ -282,7 +283,6 @@ services:
       - pgserver-media:/workspace/media
       - pgserver-migrations:/workspace/migrations
       - ./${SAMPLE_APP}/src/webserver/user_access_config.json:/home/scenescape/Scenescape/user_access_config.json
-      - ./${SAMPLE_APP}/src/webserver/${SS_SCENE_DB:-smart-intersection-ri.tar.bz2}:/home/scenescape/Scenescape/${SS_SCENE_DB:-smart-intersection-ri.tar.bz2}
     secrets:
       - source: root-cert
         target: certs/scenescape-ca.pem
@@ -294,6 +294,34 @@ services:
       - browser.auth
       - controller.auth
     restart: on-failure:5
+
+  scene-uploader:
+    image: intel/scenescape-manager:2026.2.0
+    entrypoint: ["upload-scenes"]
+    command:
+      - --restauth
+      - /run/secrets/controller.auth
+      - --rootcert
+      - /run/secrets/certs/scenescape-ca.pem
+      - --wait
+      - "300"
+      - https://web.scenescape.intel.com/api/v1
+      - /scenes
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      - scenescape
+    environment:
+      NO_PROXY: web.scenescape.intel.com
+      no_proxy: web.scenescape.intel.com
+    volumes:
+      - ./${SAMPLE_APP}/src/webserver/scenes:/scenes:ro
+    secrets:
+      - controller.auth
+      - source: root-cert
+        target: certs/scenescape-ca.pem
+    restart: "no"
 
   scene:
     image: intel/scenescape-controller:2026.2.0
@@ -319,6 +347,8 @@ services:
     depends_on:
       web:
         condition: service_healthy
+      scene-uploader:
+        condition: service_completed_successfully
       broker:
         condition: service_started
       ntpserver:
@@ -352,6 +382,8 @@ services:
     depends_on:
       web:
         condition: service_healthy
+      scene-uploader:
+        condition: service_completed_successfully
       broker:
         condition: service_started
       ntpserver:
@@ -427,6 +459,36 @@ services:
       - scenescape
     restart: on-failure:5
 
+  prometheus:
+    image: prom/prometheus:v3.12.0
+    container_name: prometheus
+    environment:
+      - HTTP_PROXY=${http_proxy}
+      - HTTPS_PROXY=${https_proxy}
+      - NO_PROXY=$no_proxy,localhost,127.0.0.1,metrics-manager
+    volumes:
+      - ./${SAMPLE_APP}/configs/open_telemetry/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command: >
+      --config.file=/etc/prometheus/prometheus.yml
+      --storage.tsdb.path=/prometheus
+    networks:
+      - scenescape
+    restart: on-failure:5
+
+  metrics-manager:
+    image: intel/metrics-manager:2026.2.0
+    container_name: metrics-manager
+    privileged: true
+    volumes:
+      - /sys:/sys
+      - /dev:/dev
+      - ./${SAMPLE_APP}/configs/supervisord/qmmd.conf:/etc/supervisor/conf.d/qmmd.conf:ro
+      - ./${SAMPLE_APP}/configs/metrics-manager/custom-metrics/hw_info.py:/app/custom-metrics/hw_info.py:ro
+    restart: unless-stopped
+    networks:
+      - scenescape
+
 networks:
   scenescape:
 
@@ -485,3 +547,4 @@ volumes:
   pgserver-media:
   node-red-node-modules:
   sample-data:
+  prometheus-data:

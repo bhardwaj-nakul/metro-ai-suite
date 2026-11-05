@@ -15,3 +15,10 @@ datasources:
       tlsSkipVerify: false
       withCredentials: true
     uid: xU6Z19aVk
+
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: false
+    uid: PBFA97CFB590B2093

@@ -101,7 +101,7 @@ services:
       --brokerrootcert /run/secrets/certs/scenescape-ca.pem
       --autocalibration autocalibration.scenescape.intel.com:8443
     healthcheck:
-      test: "curl --insecure --silent --fail https://web.scenescape.intel.com:443/api/v1/database-ready | grep -Eq '\"(databaseReady|database_ready|ready)\"[[:space:]]*:[[:space:]]*(true|\"true\")|^true$'"
+      test: "curl --insecure --silent --fail https://localhost:443/api/v1/database-ready | grep -Eq '\"(databaseReady|database_ready|ready)\"[[:space:]]*:[[:space:]]*(true|\"true\")|^true$'"
       interval: 10s
       timeout: 120s
       retries: 10
@@ -112,6 +112,7 @@ services:
       - DBHOST=pgserver
       - NO_PROXY=${NO_PROXY:-},.scenescape.intel.com
       - no_proxy=${no_proxy:-},.scenescape.intel.com
+      - SCENESCAPE_ALLOWED_HOSTS=${HOST_IP}
     cap_add:
       - SYS_ADMIN
     devices:

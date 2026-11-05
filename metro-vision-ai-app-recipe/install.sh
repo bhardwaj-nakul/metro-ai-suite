@@ -82,6 +82,12 @@ if docker compose ps >/dev/null 2>&1; then
     docker compose down -v --remove-orphans
 fi
 
+# Clean up any existing smart-parking SceneScape settings from .env
+# (smart-parking/install.sh will re-add them if 'ss' mode is selected)
+sed -i -e '/^# SceneScape settings for smart-parking/d' \
+       -e '/^\(SCENESCAPE_ENABLED\|SS_INFLUX_BUCKET\|SS_MODELS_SRC\|SS_MODELS_TARGET\|SS_ENABLE_WEBRTC\|SS_TZ\|COMPOSE_PROFILES\)=/d' "$ENV_FILE"
+sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$ENV_FILE"
+
 # Copy appropriate docker-compose file
 if [ "$SAMPLE_APP" = "smart-intersection" ] || [ "$SCENESCAPE_ENABLED" = "true" ]; then
     cp compose-scenescape.yml docker-compose.yml

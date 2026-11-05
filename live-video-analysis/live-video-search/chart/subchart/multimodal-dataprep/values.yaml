@@ -24,6 +24,9 @@ global:
     videoFrameDecoderWorkers: '2'
     videoFrameLogLevel: INFO
     enableObjectDetection: 'true'
+    detectionModelName: ''
+    detectionClasses: ''
+    pipelineStallTimeoutS: '300'
     frameInterval: '15'
     framesTempDir: /tmp/dataprep
     ovModelsDir: /app/ov_models

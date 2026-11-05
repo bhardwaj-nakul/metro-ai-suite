@@ -24,6 +24,10 @@ services:
       - ${USER_GROUP_ID:-1000}
       - ${VIDEO_GROUP_ID:-44}
       - ${RENDER_GROUP_ID:-109}
+    ulimits:
+      nofile:
+        soft: 16384
+        hard: 65536
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v2/health/ready"]
       interval: 10s
@@ -113,7 +117,7 @@ services:
       - source: root-cert
         target: /app/secrets/certs/scenescape-ca.pem
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8081/health || exit 1"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health', timeout=5).close()"]
       interval: ${HEALTH_CHECK_INTERVAL:-30s}
       timeout: ${HEALTH_CHECK_TIMEOUT:-10s}
       retries: ${HEALTH_CHECK_RETRIES:-3}

@@ -45,6 +45,11 @@ global:
     frameInterval: '15'
     enableObjectDetection: 'true'
     detectionConfidence: '0.85'
+    # Required while enableObjectDetection is 'true': a Hugging Face OpenVINO
+    # object-detection model (OpenVINO/<repo>, see https://huggingface.co/OpenVINO).
+    detectionModelName: ''
+    # Optional comma-separated class filter, for example 'person,car'.
+    detectionClasses: ''
     ovPerformanceMode: 'THROUGHPUT'
   # Accelerator controls (GPU / NPU)
   # Host group ids that own the accelerator device nodes on the target node

@@ -154,8 +154,8 @@ spec:
               mountPath: {{ .Values.global.env.ovModelsDir }}
               subPath: ovmodels
             - name: volume-data
-              mountPath: /app/models/yolox
-              subPath: yoloxmodels
+              mountPath: /app/models/object-detection
+              subPath: detectionmodels
             {{- if $dataprepNpuEnabled }}
             - name: dev-accel
               mountPath: /dev/accel

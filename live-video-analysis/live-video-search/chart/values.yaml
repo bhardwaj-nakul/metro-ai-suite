@@ -72,6 +72,12 @@ global:
     frameInterval: "15"
     enableObjectDetection: "true"
     detectionConfidence: "0.85"
+    # Hugging Face OpenVINO object-detection model (OpenVINO/<repo>, see
+    # https://huggingface.co/OpenVINO). No default: required while
+    # enableObjectDetection is "true". detectionClasses optionally keeps only
+    # the listed comma-separated classes.
+    detectionModelName: ""
+    detectionClasses: ""
     roiConsolidationEnabled: "false"
     roiConsolidationIouThreshold: "0.2"
     roiConsolidationClassAware: "false"
@@ -88,6 +94,9 @@ global:
     sdkDetectionWorkerThreads: "2"
     sdkEmbedWorkerThreads: "2"
     sdkPipelineQueueGetTimeoutS: "1.0"
+    # Fail a video ingestion when no pipeline stage progresses for this many
+    # seconds (0 disables the watchdog).
+    pipelineStallTimeoutS: "300"
     saveRuntimePipelineStats: "false"
     sdkEnableTracing: "false"
     ovModelsDir: "/app/ov_models"

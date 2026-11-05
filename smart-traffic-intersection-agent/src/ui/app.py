@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from config import Config
 from data_loader import update_components, fetch_intersection_data, get_latest_system_info_html
+from hw_info import get_hardware_info
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -586,6 +587,14 @@ def create_dashboard_interface():
         # Row 3: System Info / Summary (full width)
         system_info_component = gr.HTML()
 
+        # Intel hardware info (CPU / GPU / NPU), from Metrics Manager
+        with gr.Row():
+            cpu_info_tb = gr.Textbox(label="Intel CPU", value="Loading...", interactive=False)
+            gpu_info_tb = gr.Textbox(label="Intel GPU", value="Loading...", interactive=False)
+            npu_info_tb = gr.Textbox(
+                label="Intel NPU (AI accelerator)", value="Loading...", interactive=False
+            )
+
         # Row 4: System Telemetry (full width)
         # NOTE: Device Security panel is available via _device_security_panel_html()
         # but hidden until data source is wired up.
@@ -610,6 +619,14 @@ def create_dashboard_interface():
             outputs=debug_panel_component
         )
         
+        # Load Intel hardware info on page load
+        interface.load(
+            fn=get_hardware_info,
+            inputs=None,
+            outputs=[cpu_info_tb, gpu_info_tb, npu_info_tb],
+            show_progress="hidden",
+        )
+
         # Running data fetcher in main event loop
         interface.load(
             fn=fetch_intersection_data,

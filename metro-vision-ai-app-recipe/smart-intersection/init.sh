@@ -1,7 +1,6 @@
 #!/bin/bash
 
 SOURCE="src"
-CHART="chart"
 if [ ! -f "${SOURCE}/secrets/browser.auth" ]; then
   bash ${SOURCE}/secrets/generate_secrets.sh
 fi
@@ -45,23 +44,3 @@ if [ ! -d "${SOURCE}/dlstreamer-pipeline-server/videos" ] || [ -z "$(find "${SOU
     fi
   done
 fi
-
-# Copy files to chart
-mkdir -p ${CHART}/files
-mkdir -p ${CHART}/files/dlstreamer-pipeline-server/user_scripts/gvapython/sscape
-mkdir -p ${CHART}/files/webserver
-cp -r \
-  ${SOURCE}/controller \
-  ${SOURCE}/grafana \
-  ${SOURCE}/mosquitto \
-  ${SOURCE}/node-red \
-  ${CHART}/files
-cp -r \
-  ${SOURCE}/dlstreamer-pipeline-server/user_scripts \
-  ${CHART}/files/dlstreamer-pipeline-server
-cp \
-  ${SOURCE}/dlstreamer-pipeline-server/config.json \
-  ${CHART}/files/dlstreamer-pipeline-server/config.json
-cp \
-  ${SOURCE}/webserver/user_access_config.json \
-  ${CHART}/files/webserver/user_access_config.json

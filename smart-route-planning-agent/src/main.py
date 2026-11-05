@@ -10,8 +10,10 @@ from typing import Any, Optional
 import gradio as gr
 
 from config import APP_DETAILS, INITIAL_MAP_HTML
+from intersections_api import start_in_background as start_intersections_api
 from services.route_service import RouteService
 from utils.logging_config import setup_logging
+from utils.hw_info import get_hardware_info
 from schema import QueueItem
 from css import style
 
@@ -295,6 +297,18 @@ def create_gradio_interface() -> gr.Blocks:
             "Get an optimal route using coordinated intersection agents that analyze **real GPX route data**, weather, live traffic, and road events."
         )
 
+        # Intel hardware info, same fields as the Smart Intersection dashboard
+        with gr.Row():
+            cpu_info_tb = gr.Textbox(
+                label="Intel CPU", value="Loading...", interactive=False
+            )
+            gpu_info_tb = gr.Textbox(
+                label="Intel GPU", value="Loading...", interactive=False
+            )
+            npu_info_tb = gr.Textbox(
+                label="Intel NPU (AI accelerator)", value="Loading...", interactive=False
+            )
+
         gr.Markdown("### Quick Route Search")
         with gr.Row(elem_classes=["horizontal-search"]):
             with gr.Column(scale=3):
@@ -387,6 +401,13 @@ def create_gradio_interface() -> gr.Blocks:
             outputs=[],
         )
 
+        # Load Intel hardware info on page load
+        app.load(
+            fn=get_hardware_info,
+            inputs=None,
+            outputs=[cpu_info_tb, gpu_info_tb, npu_info_tb],
+        )
+
         # Look of agent updates forever without blocking
         app.load(
             fn=check_for_agent_updates,
@@ -423,6 +444,7 @@ def main():
         logger.info(
             f"Starting Route Planner application on {server_name}:{server_port}..."
         )
+        start_intersections_api(host=server_name)
         app = create_gradio_interface()
         app.queue(default_concurrency_limit=9, max_size=20)
         app.launch(**server_config)

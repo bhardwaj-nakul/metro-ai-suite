@@ -140,7 +140,7 @@ class LiveTrafficController(RouteStatusInterface):
             for api_host in config.get("api_hosts", []):
                 host = api_host.get("host")
                 if host:
-                    websocket_urls.append("".join([host, api_endpoint]))
+                    websocket_urls.append(f"ws://{host}{api_endpoint}")
                 else:
                     logger.warning(f"API host entry missing 'host' key: {api_host}")
 
