@@ -19,7 +19,11 @@ traffic data streaming, or use the included broker.
 - **Docker commands and terminal usage**: You are familiar with Docker commands and using the
 terminal. If you are new to Docker, see [Docker Documentation](https://docs.docker.com/) for
 an introduction.
-- **Hugging Face token**: Set your token using `export HUGGINGFACE_TOKEN="<your-huggingface-token>"`
+- **Hugging Face authentication (conditional)**: Public, ungated models such as
+`OpenVINO/Phi-3.5-vision-instruct-int8-ov` require no Hugging Face account or token.
+You can skip account registration and token setup when using these models. If you choose a
+gated or private model, obtain the necessary model access and set an authorized token using
+`export HUGGINGFACE_TOKEN="<your-huggingface-token>"` before running setup.
 - **Registry configuration**: To pull pre-built images from a specific registry, set the `REGISTRY` and `TAG` parameters. The recommended default setting is below.
 
   ```bash
@@ -48,11 +52,16 @@ cd smart-traffic-intersection-agent/
 
 ### 2. Set the required environment variables
 
+Model selection is the user's responsibility. No VLM model is selected automatically.
+Choose a supported model from the table below and replace `<supported_model_name>` with
+its identifier before running setup:
+
 ```bash
-export VLM_MODEL_NAME=<supported_model_name>
+export VLM_MODEL_NAME="<supported_model_name>"
 ```
 
-The application has been validated with following models:
+Setup rejects an unset or empty `VLM_MODEL_NAME`. The application has been validated
+with the following models:
 
 | Model | `VLM_MODEL_NAME` |
 |-------|-----------------|
@@ -70,17 +79,24 @@ The application has been validated with following models:
 
 ### 3. Run the Complete Setup
 
-The easiest way to set up the service is to use default configurations without making any
-changes. Run the setup script with the `--setup` option to set up the agent quickly with
-the default configurations:
+After choosing and exporting `VLM_MODEL_NAME`, run the setup script with the `--setup`
+option. Other settings can use their defaults:
 
 ```bash
 source setup.sh --setup
 ```
 
+When `VLM_TARGET_DEVICE` is unset or empty, setup selects `GPU` if an Intel GPU render
+device is present on the host; otherwise it selects `CPU`.
+An explicit `VLM_TARGET_DEVICE` value is preserved.
+GPU selection also chooses the GPU-enabled OVMS image and sets `TC_SI_TARGET_DEVICE=CPU`
+before starting Smart Intersection to avoid assigning the GPU to both workloads.
+This detects hardware presence, not successful model compilation; GPU driver and model
+compatibility are still required.
+
 This single command will:
 
-- Set required environment variables with default values
+- Set default values for optional environment variables
 - Set up dependencies required for Smart Traffic Intersection Agent
 - Generate the required TLS certificates and authentication files
 - Download demo video files for testing
@@ -173,10 +189,10 @@ locations on the same machine for `n` required instances.
    > [!TIP]
    > Leave `agent_backend_port` and `agent_ui_port` empty to avoid port conflicts. Random ports would be assigned and application URLs with assigned ports will be shown when setup finishes.
 
-3. Set the required environment variable.
+3. Choose a supported model and set the required environment variable.
 
    ```bash
-   export VLM_MODEL_NAME=<supported_model_name>  # eg. OpenVINO/Phi-3.5-vision-instruct-int8-ov, OpenVINO/Qwen2-VL-2B-Instruct-int4-ov
+   export VLM_MODEL_NAME="<supported_model_name>" # eg. OpenVINO/Phi-3.5-vision-instruct-int8-ov, OpenVINO/Qwen2-VL-2B-Instruct-int4-ov
    ```
 
    > [!NOTE]
@@ -221,10 +237,10 @@ locations on the same machine for `n` required instances.
    > [!TIP]
    > Leave `agent_backend_port` and `agent_ui_port` empty to avoid port conflicts. Random ports would be assigned and application URLs with assigned ports will be shown when setup finishes.
 
-3. Set the required environment variable.
+3. Choose a supported model and set the required environment variable.
 
    ```bash
-   export VLM_MODEL_NAME=<supported_model_name>  # eg. OpenVINO/Phi-3.5-vision-instruct-int8-ov, OpenVINO/Qwen2-VL-2B-Instruct-int4-ov
+   export VLM_MODEL_NAME="<supported_model_name>" # eg. OpenVINO/Phi-3.5-vision-instruct-int8-ov, OpenVINO/Qwen2-VL-2B-Instruct-int4-ov
    ```
 
    > [!NOTE]
@@ -268,8 +284,9 @@ For advanced users who need more control over the configuration, you can configu
 # Set log level to debug to help in debugging issues, default value is info
 export LOG_LEVEL=DEBUG
 
-# Select iGPU as the accelerator to perform VLM inference. By default, it is set to CPU
-export VLM_TARGET_DEVICE=GPU
+# Optional: force CPU instead of the default GPU-if-detected selection.
+# Set GPU to require GPU inference, or unset VLM_TARGET_DEVICE to restore automatic selection.
+export VLM_TARGET_DEVICE=CPU
 
 # Other VLM related config, sample values
 export VLM_TIMEOUT_SECONDS=600          # Default 300
@@ -362,12 +379,13 @@ volumes and secrets can cause failures. Clean up old containers and re-run setup
 
 ```bash
 source setup.sh --clean --keep-models
-export VLM_MODEL_NAME=<supported_model_name>
+export VLM_MODEL_NAME="<supported_model_name>"
 source setup.sh --setup
 ```
 
 The `--keep-models` flag preserves downloaded VLM model files so they don't need to be
-re-downloaded.
+re-downloaded. Replace `<supported_model_name>` with your chosen model's identifier;
+use the previous model's identifier to reuse its cache.
 
 > [!IMPORTANT]
 > If the PostgreSQL version has changed between releases, the existing data

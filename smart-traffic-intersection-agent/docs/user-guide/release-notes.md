@@ -1,5 +1,16 @@
 # Release Notes: Smart Traffic Intersection Agent
 
+## Version 2026.3.0
+
+**Release Date**: TBD
+
+> [!NOTE]
+> Helm Chart support will be deprecated in the next release. Limited validation has been performed on the Helm charts for this release.
+
+**Improved**:
+
+- Updated OpenVINO Model Server (OVMS) CPU and GPU images to version 2026.4.0 for Docker Compose deployments.
+
 ## Version 2026.2.0
 
 **Release Date**: September 10, 2026
@@ -11,6 +22,14 @@
 - Enabled fullscreen and download actions for camera gallery images so pedestrian and traffic views can be inspected more easily.
 - Added configurable camera-feed staleness detection with a visual `STALE` badge when a frame is older than the configured threshold.
 - Enabled GPU with Trusted Compute.
+
+**Improved**:
+
+- Setup script deployments now select GPU for VLM inference when an Intel GPU
+  render device is detected, otherwise CPU. Explicit device selections are preserved.
+  GPU selection sets Smart Intersection to CPU before startup to avoid accelerator contention.
+- Clarified that public, ungated models do not require a Hugging Face account or token.
+  Authentication instructions apply only to gated or private models.
 
 ## Version 2026.1.0
 

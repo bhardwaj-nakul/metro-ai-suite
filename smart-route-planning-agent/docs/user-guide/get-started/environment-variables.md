@@ -25,13 +25,13 @@ This section explains the environment variables used to configure the Smart Rout
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OVMS_CACHE_SIZE` | `10` | Value for KV cache in GiB. Increase this value for better performance. |
-| `REASONING_TIMEOUT_SEC` | `15.0` | Timeout in seconds for the reasoning model. Increase this value for larger models or slower hardware. |
+| `REASONING_TIMEOUT_SEC` | `120.0` | Timeout in seconds for the reasoning model. Allows headroom for the documented Qwen models on CPU. Increase this value for larger models or slower hardware; a longer timeout also delays rule-based fallback when the model does not respond. |
 
 ### Example:
 
 ```bash
 export OVMS_CACHE_SIZE=20
-export REASONING_TIMEOUT_SEC=30.0
+export REASONING_TIMEOUT_SEC=180.0
 ```
 
 

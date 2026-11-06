@@ -6,8 +6,8 @@ This section provides detailed hardware, software, and platform requirements to 
 
 **Operating Systems**
 
-- Ubuntu 22.04 LTS
 - Ubuntu 24.04 LTS
+- Ubuntu 26.04 LTS
 
 **Hardware Platforms**
 
@@ -18,7 +18,7 @@ This section provides detailed hardware, software, and platform requirements to 
 | **Component**  | **Minimum Requirement**                                                  | **Recommended**                                       |
 | -------------- | ------------------------------------------------------------------------ | ----------------------------------------------------- |
 | **Processor**  | 12th Generation Intel® Core™ processor and above with Intel® HD Graphics | Intel® Core™ Ultra Processors (Series 2 — Arrow Lake) |
-| **Memory**     | 16 GB                                                                    | 16 GB                                                 |
+| **Memory**     | 32 GB                                                                    | 32 GB                                                 |
 | **Disk Space** | 64 GB                                                                    | 128 GB                                                |
 
 ## Software Requirements

@@ -25,12 +25,16 @@ The agent currently supports CPU- and GPU-based runs, and runs in the context of
 - Docker Engine version 29.0 or later
 - Docker Compose v2: [Installation Guide](https://docs.docker.com/compose/install/)
 - Git (for cloning the repository)
-- A Hugging Face account and access token (for downloading VLM models)
 
 ## Other Requirements
 
 - **MQTT Broker**: An MQTT broker for traffic data streaming (included in the deployment stack)
-- **Hugging Face Token**: Required to pull VLM model weights. See [Hugging Face Tokens](https://huggingface.co/docs/hub/security-tokens) for details.
+- **Hugging Face authentication (conditional)**: No Hugging Face account, token, or
+registration is required to download public, ungated VLM models such as
+`OpenVINO/Phi-3.5-vision-instruct-int8-ov`. If you choose a gated or private model, you need
+an account with access to that model and an authorized token. Only for those models, follow
+the [Hugging Face token instructions](https://huggingface.co/docs/hub/security-tokens) and
+set `HUGGINGFACE_TOKEN` before running setup. Internet access is still required for model downloads.
 - **Network Ports**: The agent requires available ports for the backend API (default: 8081) and UI (default: 7860). Ensure these are not in use, or leave them empty in the configuration to use ephemeral ports.
 
 ## Validation

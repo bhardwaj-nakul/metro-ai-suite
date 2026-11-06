@@ -329,6 +329,7 @@ services:
     group_add:
       - "109"
       - "110"
+      - "990"
       - "992"
       - "993"
     device_cgroup_rules:

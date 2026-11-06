@@ -1,5 +1,16 @@
 # Release Notes: Live Video Captioning
 
+## Version 2026.3.0-rc1
+
+**Release Date**: November 6, 2026
+
+> **Note:** Helm Chart support will be deprecated in the next release. Limited validation has been performed on the Helm charts for this release.
+
+**New**:
+
+- Updated the documentation, including GIFs and user guides.
+- Upgraded dependency package versions to remediate reported vulnerabilities.
+
 ## Version 2026.2.0
 
 **Release Date**: September 10, 2026

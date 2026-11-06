@@ -38,23 +38,23 @@ allow-model-invocation: true
 
 ### 阶段一：本地数据收集
 
-调用本地脚本获取本地知识库中的产品信息，脚本执行时间可能较长，必须持续检查脚本状态直到完成，禁止用 `sleep` 或其他非状态检查方式等待完成。
+调用本地脚本从本地知识库（Data Intelligence Engine）检索产品信息。脚本返回的是知识库中与问题最相关的原文片段，不是生成好的答案。脚本通常在数秒内返回；若未立即返回，必须持续检查脚本状态直到完成，禁止用 `sleep` 或其他非状态检查方式等待完成。
 ```bash
 # 示例：
-timeout 600 bash <skill-repo-dir>/skills/competitive-analysis-pdf-generator/query_rag.sh "<user query>" 5 1300
+timeout 600 bash <skill-repo-dir>/skills/competitive-analysis-pdf-generator/query_rag.sh "<user query>" 5
 ```
 
 **强制约束（Intel数据源）**
 - 本地产品信息必须来自 `query_rag.sh` 的最终返回内容。
 - 在拿到 `query_rag.sh` 最终返回前，不允许执行任何 Intel 相关网络检索（包括 web_search、curl 到公开站点、抓取网页、调用外部搜索 API）。
 - 如果脚本启动后返回 `Command still running (session xxx, pid yyy)`，必须记录 `session xxx`，随后基于这个 sessionId 做进程 `poll` 或 `log` 检查。
-- 至少检查 10 次脚本状态或日志，直到状态明确为 `completed` 或 `failed`；在状态未结束前，禁止进入 AMD 检索、HTML 生成、PDF 生成等后续步骤。
+- 持续检查脚本状态或日志，直到状态明确为 `completed` 或 `failed`；在状态未结束前，禁止进入 AMD 检索、HTML 生成、PDF 生成等后续步骤。
 - 禁止把 `pid` 当作 sessionId 去检查状态；禁止只用 `sleep` 命令或检查目录中是否有文件来判断脚本是否完成。
 
 **query_rag.sh 脚本功能：**
-- 向本地RAG知识库服务发送请求
-- 获取本地产品信息
-- 返回格式化的查询结果
+- 向本地知识库检索服务（Data Intelligence Engine，端口 16022）发送检索请求
+- 返回与问题最相关的知识库原文片段，每个片段带有序号、相关度分数和来源文件
+- 不生成答案：必须由 agent 自行从返回片段中提炼本地产品信息，片段中没有的信息不得编造
 
 #### 对比产品信息获取
 
@@ -112,13 +112,13 @@ a. **网络搜索** — 用web_search查询竞品的xxxx。
 
 1. 本地信息收集：
    执行本地脚本获取xxx：
-   timeout 600 bash <skill-repo-dir>/skills/competitive-analysis-pdf-generator/query_rag.sh "xxx产品信息" 5 1300
-   注意：至少检测10次脚本输出，脚本执行时间很久
+   timeout 600 bash <skill-repo-dir>/skills/competitive-analysis-pdf-generator/query_rag.sh "xxx产品信息" 5
+   注意：脚本返回的是知识库原文片段，需要自行从中提炼产品信息；片段中没有的规格不得编造
    强制规则：本地产品信息只能来自该脚本返回；在脚本返回前禁止任何网络检索；若失败只能重试该脚本
    如果启动结果显示 `Command still running (session xxx, pid yyy)`：
    - 必须记录 `session xxx`
    - 必须用进程状态工具基于 `session xxx` 持续 `poll` / `log`
-   - 必须至少检查10次，并且只有状态变成 `completed` 后才能进入步骤2
+   - 必须持续检查，只有状态变成 `completed` 后才能进入步骤2
    - 绝对不要把 `pid yyy` 当成 sessionId 使用
    - 绝对不要用 `sleep` 命令代替状态检查
 
@@ -397,7 +397,7 @@ a. **网络搜索** — 用web_search查询竞品的xxxx。
 4. 返回固定文件名 `Market_Product_Research_for_xxx.pdf`
 
 强制要求：
-**不要进行过短的脚本超时设置**：调用本地脚本获取信息需要较长时间，请耐心等待结果返回，多次查询脚本结果。
+**不要进行过短的脚本超时设置**：请耐心等待本地脚本返回结果，未返回前持续查询脚本状态。
 **必须生成对比产品的信息摘要**
 **封面必须直接套用prompt内提供的封面模板，只允许替换前导标签、标题、副标题、年份，不要自行设计新的封面结构**
 **WeasyPrint 转 PDF 时，封面必须使用 `@page` 和 `mm`/`pt` 单位，禁止使用 `vh` 作为封面高度依据**
@@ -415,8 +415,10 @@ a. **网络搜索** — 用web_search查询竞品的xxxx。
 ## 脚本依赖
 
 ### query_rag.sh
-- API端点：/v1/chatqna
-- 参数：问题文本、top_n(默认5)、max_tokens(默认1300)
+- 服务：Data Intelligence Engine（默认 `http://localhost:16022`，可用环境变量 `KB_ENGINE_URL` 修改）
+- API端点：/v1/retrieve（只返回检索结果，不调用LLM生成答案）
+- 知识库：asset library `enterprise-kb`（可用 `KB_LIBRARY` 修改），可选 asset pool（`KB_POOL`，默认检索全部 pool）
+- 参数：问题文本、top_k(返回的片段数，默认5)
 
 ## 输出示例
 

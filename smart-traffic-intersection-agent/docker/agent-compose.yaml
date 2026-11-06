@@ -7,7 +7,7 @@ secrets:
 
 services:
   ovms-service:
-    image: openvino/model_server:${OVMS_TAG:-2026.1}
+    image: openvino/model_server:${OVMS_TAG:-2026.4.0}
     ports:
       - "8000"
     networks:

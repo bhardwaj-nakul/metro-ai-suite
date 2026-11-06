@@ -191,6 +191,8 @@ services:
       - "110"
       # render group ID for ubuntu 24.04 host OS
       - "992"
+      # render group ID for ubuntu 26.04 host OS
+      - "990"
     device_cgroup_rules:
       - 'c 189:* rmw'
       - 'c 209:* rmw'

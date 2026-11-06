@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: data_intelligence_engine "question" [--library NAME] [--pool ID] [--top-k N]
+
+Retrieves the most relevant knowledge base chunks from the Data Intelligence
+Engine (POST /v1/retrieve). The engine returns source text only; it does not
+generate an answer.
+
+Options:
+  --library NAME  asset library name or ID (default: $KB_LIBRARY)
+  --pool ID       asset pool ID to search, repeatable (default: $KB_POOL, or every pool)
+  --top-k N       chunks retrieved per source (default: 5)
+
+Environment:
+  KB_ENGINE_URL       engine base URL (default: http://localhost:16022)
+  KB_LIBRARY          asset library name or ID (default: enterprise-kb)
+  KB_POOL             asset pool ID (default: every pool in the library)
+  KB_CONNECT_TIMEOUT  connection timeout in seconds (default: 10)
+EOF
+}
+
+json_escape() {
+  local value="$1" escaped="" char
+  local index
+
+  for ((index = 0; index < ${#value}; index++)); do
+    char="${value:index:1}"
+    case "$char" in
+      '"') escaped+='\"' ;;
+      '\') escaped+='\\' ;;
+      $'\b') escaped+='\b' ;;
+      $'\f') escaped+='\f' ;;
+      $'\n') escaped+='\n' ;;
+      $'\r') escaped+='\r' ;;
+      $'\t') escaped+='\t' ;;
+      *) escaped+="$char" ;;
+    esac
+  done
+
+  printf '%s' "$escaped"
+}
+
+require_positive_integer() {
+  local option="$1" value="$2"
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: $option must be a positive integer." >&2
+    exit 2
+  fi
+}
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "Error: curl is required but was not found in PATH." >&2
+  exit 127
+fi
+
+if [[ $# -eq 1 && ( "$1" == "-h" || "$1" == "--help" ) ]]; then
+  usage
+  exit 0
+fi
+
+if [[ $# -lt 1 ]]; then
+  usage >&2
+  exit 2
+fi
+
+library="${KB_LIBRARY:-enterprise-kb}"
+top_k="5"
+pools=()
+query_parts=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --library)
+      [[ $# -ge 2 ]] || { echo "Error: --library requires a value." >&2; exit 2; }
+      library="$2"
+      shift 2
+      ;;
+    --pool)
+      [[ $# -ge 2 ]] || { echo "Error: --pool requires a value." >&2; exit 2; }
+      pools+=("$2")
+      shift 2
+      ;;
+    --top-k)
+      [[ $# -ge 2 ]] || { echo "Error: --top-k requires a value." >&2; exit 2; }
+      top_k="$2"
+      shift 2
+      ;;
+    --)
+      shift
+      query_parts+=("$@")
+      break
+      ;;
+    --*)
+      echo "Error: unknown option '$1'." >&2
+      exit 2
+      ;;
+    *)
+      query_parts+=("$1")
+      shift
+      ;;
+  esac
+done
+
+query="${query_parts[*]}"
+if [[ -z "${query//[[:space:]]/}" ]]; then
+  echo "Error: query text cannot be empty." >&2
+  exit 2
+fi
+
+if [[ -z "${library//[[:space:]]/}" ]]; then
+  echo "Error: library cannot be empty." >&2
+  exit 2
+fi
+
+require_positive_integer "--top-k" "$top_k"
+
+if [[ ${#pools[@]} -eq 0 && -n "${KB_POOL:-}" ]]; then
+  pools=("$KB_POOL")
+fi
+
+engine_url="${KB_ENGINE_URL:-http://localhost:16022}"
+connect_timeout="${KB_CONNECT_TIMEOUT:-10}"
+engine_url="${engine_url%/}"
+
+require_positive_integer "KB_CONNECT_TIMEOUT" "$connect_timeout"
+
+pools_json=""
+for pool in "${pools[@]}"; do
+  pools_json+="${pools_json:+,}\"$(json_escape "$pool")\""
+done
+
+payload=$(printf '{"query":"%s","libraries":["%s"],"asset_pool_ids":[%s],"top_k":%s}' \
+  "$(json_escape "$query")" "$(json_escape "$library")" "$pools_json" "$top_k")
+
+if ! response=$(curl \
+  --silent \
+  --show-error \
+  --fail-with-body \
+  --connect-timeout "$connect_timeout" \
+  --request POST \
+  --header "Content-Type: application/json" \
+  --data "$payload" \
+  "${engine_url}/v1/retrieve"); then
+  printf '%s\n' "$response" >&2
+  exit 1
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+  printf '%s\n' "$response"
+  exit 0
+fi
+
+jq -r '
+  if (.chunks | length) == 0 then
+    "No matching content was found in the knowledge base."
+  else
+    .chunks | to_entries[] |
+      "[\(.key + 1)] score=\((.value.score * 1000 | round) / 1000) source=\(.value.metadata.file_name // .value.metadata.asset_id // "unknown")\n\(.value.text)\n"
+  end
+' <<<"$response"

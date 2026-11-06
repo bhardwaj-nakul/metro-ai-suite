@@ -93,6 +93,7 @@ podSecurityContext:
     - 109
     - 110
     - 992
+    - 990
 securityContext: {}
 
 podAnnotations: {}

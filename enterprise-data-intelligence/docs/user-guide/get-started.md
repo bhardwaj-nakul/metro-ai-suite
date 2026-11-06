@@ -1,7 +1,8 @@
 # Get Started
 
-This guide provides the demo setup steps for the OpenClaw service, EC-RAG service, Router
-service, Compressor service, and the UI service.
+This guide provides the demo setup steps for the OpenClaw service, the Data Intelligence Engine
+(knowledge base retrieval), the vLLM service, the Router service, the Compressor service, and the
+UI service.
 
 ## Prerequisites
 
@@ -20,7 +21,7 @@ Before you begin, ensure the following:
 ## Table of Contents
 
 - [1. Set Up Router and Compressor Services](#1-set-up-router-and-compressor-services)
-- [2. Set Up EC-RAG](#2-set-up-ec-rag)
+- [2. Set Up vLLM and the Data Intelligence Engine](#2-set-up-vllm-and-the-data-intelligence-engine)
 - [3. Set Up OpenClaw](#3-set-up-openclaw)
   - [3.1 Install and Onboard OpenClaw](#31-install-and-onboard-openclaw)
   - [3.2 Configure `openclaw.json`](#32-configure-openclawjson)
@@ -37,21 +38,22 @@ The Router and Compressor services are set up separately. See the
 microservice for the full instructions on generating the configuration and starting both
 services.
 
-## 2. Set Up EC-RAG
+## 2. Set Up vLLM and the Data Intelligence Engine
 
-### a. Prepare embedding/reranker/LLM models
+The OpenClaw agent and the Router use a local vLLM service on port `8086` for the
+`Qwen/Qwen3.5-35B-A3B` model. The knowledge base is served by the
+[Data Intelligence Engine](https://github.com/open-edge-platform/edge-ai-libraries/tree/main/microservices/data-intelligence-engine)
+on port `16022`. The engine embeds documents, retrieves the most relevant chunks, and returns
+them to the Skills. It does not generate answers; the OpenClaw agent writes the
+answer from the retrieved chunks.
+
+### a. Prepare the LLM model
 
 ```bash
 python3 -m venv model_download_venv
 source model_download_venv/bin/activate
-# Download BAAI/bge-m3 和 BAAI/bge-reranker-large
-pip install --upgrade --upgrade-strategy eager "optimum[openvino]"
-export HF_ENDPOINT=https://hf-mirror.com
-export MODEL_PATH=${PWD}/workspace/models
-optimum-cli export openvino -m BAAI/bge-m3 ${MODEL_PATH}/BAAI/bge-m3-int8 --weight-format int8 --task sentence-similarity
-optimum-cli export openvino -m BAAI/bge-reranker-large  ${MODEL_PATH}/BAAI/bge-reranker-large-int8 --weight-format int8 --task text-classification
-# Download Qwen3.5-35B-A3B
 pip install modelscope
+export MODEL_PATH=${PWD}/workspace/models
 export LLM_MODEL="Qwen/Qwen3.5-35B-A3B"
 modelscope download --model $LLM_MODEL --local_dir "${MODEL_PATH}/${LLM_MODEL}"
 # clean venv
@@ -59,142 +61,119 @@ deactivate
 rm -rf model_download_venv
 ```
 
-### b. Start Service
-
-```bash
-# clone OPEA EC-RAG repo with pinned commit
-git clone --filter=blob:none --sparse https://github.com/opea-project/GenAIExamples.git
-cd GenAIExamples
-git sparse-checkout set EdgeCraftRAG
-git checkout f56422671c8bdf46f59dd758c8c9e38ca41d6555
-cd EdgeCraftRAG
-
-# Pin the EC-RAG server image and update the vLLM backend image and configuration:
-compose=docker_compose/intel/gpu/arc/compose.yaml
-server_image_template='${REGISTRY:-opea}/edgecraftrag-server:${TAG:-latest}'
-server_image='opea/edgecraftrag-server@sha256:8f8fe1dbdf813567e44b41c237f20862c65240bfc888808e4694bf396b2434da'
-
-grep -Fq "$server_image_template" "$compose" || {
-  echo "ERROR: expected EC-RAG server image not found in $compose; the pinned commit changed, update this guide" >&2
-  exit 1
-}
-
-grep -q 'intel/llm-scaler-vllm:0.11.1-b7' "$compose" || {
-  echo "ERROR: expected image tag not found in $compose; the pinned commit changed, update this guide" >&2
-  exit 1
-}
-
-sed -i \
-  -e '/--disable-log-requests/d' \
-  -e 's@ source /opt/intel/oneapi/setvars.sh --force &&@@' \
-  -e 's@intel/llm-scaler-vllm:0.11.1-b7@intel/llm-scaler-vllm:0.21.0-b1@g' \
-  -e 's@VLLM_OFFLOAD_WEIGHTS_BEFORE_QUANT=1@VLLM_OFFLOAD_WEIGHTS_BEFORE_QUANT=0@g' \
-  -e "s|$server_image_template|$server_image|g" \
-  "$compose"
-
-grep -Fq "$server_image" "$compose" || {
-  echo "ERROR: EC-RAG server image digest rewrite did not apply to $compose; aborting" >&2
-  exit 1
-}
-
-grep -q 'intel/llm-scaler-vllm:0.21.0-b1' "$compose" || {
-  echo "ERROR: vLLM image rewrite did not apply to $compose; aborting" >&2
-  exit 1
-}
-```
-
-Then you can launch service:
+### b. Start vLLM
 
 > [!NOTE]
-> `LLM_MODEL` and `MODEL_PATH` were set in [Prepare embedding/reranker/LLM models](#a-prepare-embeddingrerankerllm-models). Ensure both remain exported in the current shell.
+> `LLM_MODEL` and `MODEL_PATH` were set in [Prepare the LLM model](#a-prepare-the-llm-model). Ensure both remain exported in the current shell.
 
 ```bash
-ip_address=$(hostname -I | awk '{print $1}')
-export HOST_IP=$ip_address # Your host ip
-export VIDEOGROUPID=$(getent group video | cut -d: -f3)
-export RENDERGROUPID=$(getent group render | cut -d: -f3)
-export no_proxy=${no_proxy},${HOST_IP},edgecraftrag,edgecraftrag-server
-export NO_PROXY=${NO_PROXY},${HOST_IP},edgecraftrag,edgecraftrag-server
-# If you have a HF mirror configured, it will be imported to the container
-export HF_ENDPOINT=https://hf-mirror.com # your HF mirror endpoint"
-# Make sure all 3 folders have 1000:1000 permission
-export DOC_PATH=${PWD}/workspace
-export TMPFILE_PATH=${PWD}/workspace
-sudo chown 1000:1000 ${MODEL_PATH} ${DOC_PATH} ${TMPFILE_PATH}
-sudo chown 1000:1000 -R $HOME/.cache
-# b60 flag also fit for PTL Xe3 Arch
-docker compose --profile b60 -f docker_compose/intel/gpu/arc/compose.yaml up -d
-
+docker run -d --name vllm-serving --restart always --privileged \
+  --device /dev/dri:/dev/dri \
+  -p 8086:8086 \
+  -v "${MODEL_PATH}:/workspace/vllm/models" \
+  -e LLM_MODEL="${LLM_MODEL}" \
+  -e ZE_AFFINITY_MASK=0 \
+  --entrypoint /bin/bash \
+  intel/llm-scaler-vllm:0.21.0-b1 \
+  -c 'cd /workspace/vllm/models && \
+    VLLM_OFFLOAD_WEIGHTS_BEFORE_QUANT=0 \
+    TORCH_LLM_ALLREDUCE=1 \
+    VLLM_USE_V1=1 \
+    CCL_ZE_IPC_EXCHANGE=pidfd \
+    VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 \
+    VLLM_WORKER_MULTIPROC_METHOD=spawn \
+    python3 -m vllm.entrypoints.openai.api_server \
+      --model "${LLM_MODEL}" \
+      --dtype float16 \
+      --enforce-eager \
+      --port 8086 \
+      --trust-remote-code \
+      --disable-sliding-window \
+      --gpu-memory-util 0.8 \
+      --no-enable-prefix-caching \
+      --max-num-batched-tokens 8192 \
+      --max-model-len 49152 \
+      --block-size 64 \
+      --quantization fp8 \
+      --max-num-seqs 128 \
+      -tp=1 \
+      -dp=1 \
+      --enable_prefix_caching True \
+      --enable-auto-tool-choice \
+      --tool-call-parser qwen3_coder'
 ```
 
-### c. Load Pipeline
-
-Get the host IP and send the pipeline configuration directly to EC-RAG:
+Loading the model takes several minutes. Follow the progress with `docker logs -f vllm-serving`,
+and verify the service once it is up:
 
 ```bash
-HOST_IP=$(hostname -I | awk '{print $1}')
+curl http://localhost:8086/v1/models | jq '.'
+```
 
-curl -X POST "http://${HOST_IP}:16010/v1/settings/pipelines" \
-  -H "Content-Type: application/json" \
-  --data-binary @- <<EOF | jq '.'
-{
-  "name": "rag_pipeline",
-  "node_parser": {
-    "chunk_size": 400,
-    "chunk_overlap": 48,
-    "parser_type": "simple"
-  },
-  "indexer": {
-    "indexer_type": "faiss_vector",
-    "embedding_model": {
-      "model_id": "BAAI/bge-m3-int8",
-      "model_path": "./models/BAAI/bge-m3-int8",
-      "device": "auto",
-      "weight": "INT8"
-    }
-  },
-  "retriever": {
-    "retriever_type": "vectorsimilarity",
-    "retrieve_topk": 30
-  },
-  "postprocessor": [
-    {
-      "processor_type": "reranker",
-      "top_n": 2,
-      "reranker_model": {
-        "model_id": "BAAI/bge-reranker-large-int8",
-        "model_path": "./models/BAAI/bge-reranker-large-int8",
-        "device": "auto",
-        "weight": "INT8"
-      }
-    }
-  ],
-  "generator": {
-    "generator_type": "chatqna",
-    "inference_type": "vllm",
-    "model": {
-      "model_id": "Qwen/Qwen3.5-35B-A3B",
-      "model_path": "",
-      "device": "",
-      "weight": ""
-    },
-    "prompt_path": "./default_prompt.txt",
-    "vllm_endpoint": "http://${HOST_IP}:8086"
-  },
-  "active": "True"
-}
+### c. Start the Data Intelligence Engine
+
+Clone the engine with a pinned commit and start it with its one-click script. Text ingestion
+and retrieval need only the GME model, which embeds both the documents and the queries, so
+prepare just that one. The script builds the engine image, prepares GME, starts Milvus and the
+engine on port `16022`, and registers Milvus as `local-milvus`. It needs Docker Compose v2,
+`curl`, and `jq`.
+
+```bash
+git clone --filter=blob:none --sparse https://github.com/open-edge-platform/edge-ai-libraries.git
+cd edge-ai-libraries
+git sparse-checkout set microservices/data-intelligence-engine
+git checkout 0d78bc1f905fc016b9f609456a2d8d8dd3ed1153
+cd microservices/data-intelligence-engine
+
+# If you have a HF mirror configured, it is used for the model download
+export HF_ENDPOINT=https://hf-mirror.com # your HF mirror endpoint
+bash scripts/quickstart.sh --models "gme"
+
+cd scripts
+./status.sh health
+```
+
+Later runs only need `bash scripts/quickstart.sh` to start the services again. Run the commands
+in the following steps from the `scripts` directory.
+
+### d. Create the Knowledge Base
+
+The Skills search the asset library `enterprise-kb` by default. Create the library, a source
+that indexes into Milvus with the default text model, and a pool named `documents` that binds
+them:
+
+```bash
+./library.sh create '{"name":"enterprise-kb"}'
+./sources.sh create enterprise-kb '{"name":"docs","database_id":"local-milvus","collection_name":"enterprise_kb_docs"}'
+./pools.sh create enterprise-kb '{"id":"documents","name":"Documents","sources":["docs"]}'
+```
+
+### e. Add Data
+
+Write a sample text file and ingest it. `--wait` returns once the file is indexed:
+
+```bash
+cat > /tmp/intel_products.txt <<'EOF'
+Intel Core Ultra X7 358H is a mobile processor designed for high-performance laptops. It combines
+CPU, integrated Intel graphics, and NPU capabilities to support productivity, content creation,
+and AI workloads.
 EOF
+./assets.sh add enterprise-kb /tmp/intel_products.txt --pool documents --wait
 ```
 
-### d. Add Text
+Add your own text documents the same way; a folder path ingests every supported file in it.
 
-Add text to the EC-RAG knowledge base:
+### f. Verify Retrieval
 
 ```bash
-curl -X POST "http://${HOST_IP}:16010/v1/data" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"Intel Core Ultra X7 358H is a mobile processor designed for high-performance laptops. It combines CPU, integrated Intel graphics, and NPU capabilities to support productivity, content creation, and AI workloads."}' | jq '.'
+./retrieve.sh query enterprise-kb "What is Intel Core Ultra X7 358H?" --pool documents --top-k 5 \
+  | jq '.chunks[] | {score, file: .metadata.file_name, text}'
 ```
+
+The engine returns the retrieved chunks in `chunks`; this is the same `POST /v1/retrieve`
+request that the `knowledgebase` and `competitive_analysis_PDF_generator` Skills send. If you
+use a different engine address, library, or pool, set `KB_ENGINE_URL`, `KB_LIBRARY`, or
+`KB_POOL` in the environment of the OpenClaw gateway.
 
 ## 3. Set Up OpenClaw
 

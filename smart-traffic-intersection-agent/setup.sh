@@ -84,6 +84,31 @@ export RTSP_STREAM_PORT="${RTSP_STREAM_PORT:-8554}"
 export STIA_DEMO_INTERSECTION="${STIA_DEMO_INTERSECTION:-}"
 export STIA_DEMO_VIDEOS_DIR="${APP_DIR}/resources/videos"
 
+detect_vlm_target_device() {
+    local render_node
+    for render_node in "$1"/renderD*; do
+        # OpenVINO's GPU backend requires an Intel GPU with a render device.
+        if [ -c "$render_node" ] &&
+            grep -qs '^0x8086$' "$2/${render_node##*/}/device/vendor"; then
+            printf '%s\n' GPU
+            return 0
+        fi
+    done
+    printf '%s\n' CPU
+}
+
+if [ -z "${VLM_TARGET_DEVICE:-}" ]; then
+    VLM_TARGET_DEVICE=$(detect_vlm_target_device /dev/dri /sys/class/drm)
+fi
+export VLM_TARGET_DEVICE
+
+# Reserve the GPU for OVMS/VLM before configuring or starting Smart Intersection.
+export TC_SI_TARGET_DEVICE=${TC_SI_TARGET_DEVICE:-CPU}
+if [ "$VLM_TARGET_DEVICE" = "GPU" ] && [ "$TC_SI_TARGET_DEVICE" != "CPU" ]; then
+    echo -e "${YELLOW}VLM_TARGET_DEVICE=GPU: overriding TC_SI_TARGET_DEVICE to CPU (GPU reserved for OVMS).${NC}"
+    export TC_SI_TARGET_DEVICE=CPU
+fi
+
 if [ "$ENABLE_TC" = "true" ]; then
     TC_OVERLAY_AGENT="-f ${APP_DIR}/docker/tc-overlay-agent.yaml"
     if [ "$VLM_TARGET_DEVICE" = "GPU" ]; then
@@ -235,11 +260,11 @@ fi
 # Dependencies: Setup Smart Intersection RI before running the agent Backend/UI
 # ============================================================================
 
-# Check if VLM Model name is set or not
-if [ -z "$VLM_MODEL_NAME" ]; then
-    echo -e "${RED}Error: VLM_MODEL_NAME environment variable is not set. Please check docs for some possible VLM model names.${NC}"
+if [ -z "${VLM_MODEL_NAME:-}" ]; then
+    echo -e "${RED}Error: VLM_MODEL_NAME is required. Choose a supported model and export its name before running setup. No model is selected automatically.${NC}" >&2
     return 1
 fi
+export VLM_MODEL_NAME
 
 # Copy tracked site-specific Smart Intersection overrides (DL Streamer Pipeline Server
 # config and Scenescape scene bundle) into the vendored RI dependency. These live under
@@ -519,23 +544,14 @@ export VIDEO_GROUP_ID=$(getent group video | awk -F: '{printf "%s\n", $3}' 2>/de
 export RENDER_GROUP_ID=$(getent group render | awk -F: '{printf "%s\n", $3}' 2>/dev/null || echo "109")
 
 # VLM / OVMS Configuration
-export VLM_MODEL_NAME=${VLM_MODEL_NAME}
-export VLM_TARGET_DEVICE=${VLM_TARGET_DEVICE:-CPU}
 export VLM_WEIGHT_FORMAT=${VLM_WEIGHT_FORMAT:-}
-
-# When VLM_TARGET_DEVICE=GPU, force SI to CPU so GPU is reserved for OVMS/VLM.
-export TC_SI_TARGET_DEVICE=${TC_SI_TARGET_DEVICE:-CPU}
-if [ "$VLM_TARGET_DEVICE" = "GPU" ] && [ "$TC_SI_TARGET_DEVICE" != "CPU" ]; then
-    echo -e "${YELLOW}VLM_TARGET_DEVICE=GPU: overriding TC_SI_TARGET_DEVICE to CPU (GPU reserved for OVMS).${NC}"
-    export TC_SI_TARGET_DEVICE=CPU
-fi
 
 # Select OVMS image tag based on target device:
 # GPU requires the GPU-enabled image (includes OpenCL/Level Zero runtime).
 # Mirrors the Helm chart logic: vlmServing.image.gpuTag vs vlmServing.image.tag.
 case "$VLM_TARGET_DEVICE" in
-    *GPU*) export OVMS_TAG="${OVMS_TAG:-2026.1-gpu}" ;;
-    *)     export OVMS_TAG="${OVMS_TAG:-2026.1}" ;;
+    *GPU*) export OVMS_TAG="${OVMS_TAG:-2026.4.0-gpu}" ;;
+    *)     export OVMS_TAG="${OVMS_TAG:-2026.4.0}" ;;
 esac
 
 # OVMS model repository directory (host-side, mounted into OVMS container)

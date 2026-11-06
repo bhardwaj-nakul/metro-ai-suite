@@ -1,5 +1,20 @@
 # Release Notes: Live Video Captioning RAG
 
+## Version 2026.3.0-rc1
+
+**Release Date**: November 6, 2026
+
+> **Note:** Helm Chart support will be deprecated in the next release. Limited validation has been performed on the Helm charts for this release.
+
+**New**:
+
+- Integrated NPU support for embedding and LLM inference in RAG workflows.
+- Updated Helm charts and Docker Compose configurations to support NPU devices.
+- Revised documentation to reflect NPU integration for embedding and LLM inference in RAG workflows.
+- Enabled chatbot mode for detached new-tab windows and embedded views in the live-video-captioning dashboard.
+- Upgraded GPU and NPU driver version.
+- Bumped dependency package versions to address reported vulnerabilities.
+
 ## Version 2026.2.0
 
 **Release Date**: September 10, 2026

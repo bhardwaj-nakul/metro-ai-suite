@@ -1,6 +1,6 @@
 # System Requirements
 
-This page provides detailed hardware, software, and platform requirements to help you set up and run Agentic Smart Community efficiently.
+This page provides detailed hardware, software, and platform requirements to help you set up and run efficiently.
 
 ## Supported Platforms
 

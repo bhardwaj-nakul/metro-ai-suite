@@ -138,6 +138,7 @@ services:
     group_add:
       - "109"
       - "110"
+      - "990"
       - "992"
     device_cgroup_rules:
       - 'c 189:* rmw'

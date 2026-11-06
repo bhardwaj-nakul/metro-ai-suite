@@ -14,12 +14,12 @@ services:
     environment:
       - http_proxy=${http_proxy}
       - https_proxy=${https_proxy}
-      - no_proxy=${no_proxy},${HOST_IP},ovms
+      - no_proxy=${no_proxy:-${NO_PROXY}},${HOST_IP},ovms
       - HTTP_PROXY=${http_proxy}
       - HTTPS_PROXY=${https_proxy}
-      - NO_PROXY=${no_proxy},${HOST_IP},ovms
+      - NO_PROXY=${no_proxy:-${NO_PROXY}},${HOST_IP},ovms
       - REASONING_MODEL_NAME=${REASONING_MODEL_NAME:-}  # Optional. When empty, rule based planning is used.
-      - REASONING_TIMEOUT_SEC=${REASONING_TIMEOUT_SEC:-15.0}  # Increase for larger reasoning models (e.g. 60-120s for 14B on CPU).
+      - REASONING_TIMEOUT_SEC=${REASONING_TIMEOUT_SEC:-120.0}  # Increase for larger models or slower hardware.
       - INTERSECTIONS_API_PORT=8765
     volumes:
       - ./data/config.json:/app/data/config.json:ro
@@ -51,7 +51,7 @@ services:
     restart: unless-stopped
 
   ovms:
-    image: openvino/model_server:2026.3.1
+    image: openvino/model_server:2026.4.0
     profiles:
       - reasoning
     command:
@@ -72,10 +72,10 @@ services:
     environment:
       - http_proxy=${http_proxy}
       - https_proxy=${https_proxy}
-      - no_proxy=${no_proxy},${HOST_IP}
+      - no_proxy=${no_proxy:-${NO_PROXY}},${HOST_IP}
       - HTTP_PROXY=${http_proxy}
       - HTTPS_PROXY=${https_proxy}
-      - NO_PROXY=${no_proxy},${HOST_IP}
+      - NO_PROXY=${no_proxy:-${NO_PROXY}},${HOST_IP}
       # Only needed for gated repositories on HuggingFace.
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:

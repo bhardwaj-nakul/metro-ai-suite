@@ -46,6 +46,8 @@ services:
       - "110"
       # render group ID for ubuntu 24.04 host OS
       - "992"
+      # render group ID for ubuntu 26.04 host OS
+      - "990"
     volumes:
       - "${MODEL_CACHE_PATH:-/tmp/model_cache}:/tmp/model_cache"
     healthcheck:
@@ -210,6 +212,8 @@ services:
       - "110"
       # render group ID for ubuntu 24.04 host OS
       - "992"
+      # render group ID for ubuntu 26.04 host OS
+      - "990"
     device_cgroup_rules:
       # Default run - device-cgroup-rule='c 189:* rmw'
       # Selective rules can be applied for deployment

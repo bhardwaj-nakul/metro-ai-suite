@@ -19,6 +19,8 @@ services:
       - "110"
       # render group ID for ubuntu 24.04 host OS
       - "992"
+      # render group ID for ubuntu 26.04 host OS
+      - "990"
     devices:
       # you can add specific devices in case you don't want to provide access to all like below.
       - "/dev:/dev"
