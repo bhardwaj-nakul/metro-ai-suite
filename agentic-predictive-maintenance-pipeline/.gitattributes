@@ -1,0 +1,1 @@
+apps/gas-detection-multimodal/models/**/*.bin filter=lfs diff=lfs merge=lfs -text

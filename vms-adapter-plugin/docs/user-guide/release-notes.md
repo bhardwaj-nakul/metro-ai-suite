@@ -1,6 +1,18 @@
 # Release Notes: VMS Adapter Plugin
 
-**Release Date**: September 10, 2026
+## Version 2026.3.0
+
+**New**:
+
+- **Milestone VMS Integration**: Integrated Milestone VMS with VAP. It supports the Loitering
+  Detection Metro AI Suite application.
+
+- **Loitering Bookmarks**: Bookmarks/events are pushed for Loitering Detection when a person's
+  dwell time inside the loitering region exceeds the configured threshold time.
+
+**Improved**:
+
+- Consumed the new Loitering Detection pipeline.
 
 ## Version 1.0.0
 

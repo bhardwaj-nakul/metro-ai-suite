@@ -7,6 +7,8 @@ SQLite client for persisting and querying defect detections.
 
 import sqlite3
 import logging
+
+import math
 import os
 from typing import Optional
 
@@ -25,21 +27,30 @@ logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS detections (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    frame_id  INTEGER NOT NULL,
-    label     TEXT    NOT NULL,
-    confidence REAL   NOT NULL,
-    x         REAL    NOT NULL,
-    y         REAL    NOT NULL,
-    width     REAL    NOT NULL,
-    height    REAL    NOT NULL,
-    timestamp TEXT    DEFAULT (datetime('now'))
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    frame_id            INTEGER NOT NULL,
+    label               TEXT    NOT NULL,
+    confidence          REAL    NOT NULL,
+    x                   REAL    NOT NULL,
+    y                   REAL    NOT NULL,
+    width               REAL    NOT NULL,
+    height              REAL    NOT NULL,
+    video_time_seconds  REAL,
+    detection_timestamp TEXT    DEFAULT (datetime('now')),
+    source              TEXT,
+    image_confidence    REAL,
+    sensor_confidence   REAL,
+    sensor_raw_json     TEXT
 );
-
-CREATE INDEX IF NOT EXISTS idx_frame_id   ON detections(frame_id);
-CREATE INDEX IF NOT EXISTS idx_label      ON detections(label);
-CREATE INDEX IF NOT EXISTS idx_confidence ON detections(confidence);
 """
+
+# Optional multimodal fields remain nullable for single-modality video results.
+MULTIMODAL_COLUMNS = {
+    "source": "TEXT",              # e.g. "gas_detection_multimodal"; NULL for plain video detections
+    "image_confidence": "REAL",    # per-branch confidence at the fused label, image modality
+    "sensor_confidence": "REAL",   # per-branch confidence at the fused label, sensor modality
+    "sensor_raw_json": "TEXT",     # raw sensor reading(s) used for this sample, JSON-encoded
+}
 
 FIELD_SQL = {
     "id": "id",
@@ -50,7 +61,12 @@ FIELD_SQL = {
     "y": "y",
     "width": "width",
     "height": "height",
-    "timestamp": "timestamp",
+    "video_time_seconds": "video_time_seconds",
+    "detection_timestamp": "detection_timestamp",
+    "source": "source",
+    "image_confidence": "image_confidence",
+    "sensor_confidence": "sensor_confidence",
+    "sensor_raw_json": "sensor_raw_json",
 }
 FRAME_FIELD_SQL = {
     "frame_id": "frame_id",
@@ -93,30 +109,82 @@ class SQLiteClient:
 
     def _init_db(self):
         with self._get_conn() as conn:
-            conn.executescript(SCHEMA)
+            conn.execute(SCHEMA)
+            self._migrate_schema(conn)
+            conn.executescript("""
+                CREATE INDEX IF NOT EXISTS idx_frame_id ON detections(frame_id);
+                CREATE INDEX IF NOT EXISTS idx_label ON detections(label);
+                CREATE INDEX IF NOT EXISTS idx_confidence ON detections(confidence);
+            """)
         logger.info("Database initialised at %s", self.db_path)
 
+    def _migrate_schema(self, conn: sqlite3.Connection) -> None:
+        """Add/rename columns introduced after a database was first created.
+
+        SQLite's ``CREATE TABLE IF NOT EXISTS`` never alters an existing
+        table, so a pre-existing database needs explicit migration: a plain
+        ``ALTER TABLE ... ADD COLUMN`` per new column, and a single
+        ``RENAME COLUMN`` for the old ``timestamp`` column. Both have been
+        supported since SQLite 3.25 (2018) — well below the 3.45+ this
+        project runs on — so there's no need to rebuild the table to
+        add/rename columns.
+        """
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(detections)")}
+
+        if "timestamp" in existing and "detection_timestamp" not in existing:
+            conn.execute("ALTER TABLE detections RENAME COLUMN timestamp TO detection_timestamp")
+            existing.discard("timestamp")
+            existing.add("detection_timestamp")
+
+        new_columns = {"video_time_seconds": "REAL", **MULTIMODAL_COLUMNS}
+        for column, sql_type in new_columns.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE detections ADD COLUMN {column} {sql_type}")
+
     def insert_detection(self, frame_id: int, label: str, confidence: float,
-                         x: float, y: float, width: float, height: float) -> int:
-        sql = """INSERT INTO detections (frame_id, label, confidence, x, y, width, height)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)"""
+                         x: float, y: float, width: float, height: float,
+                         source: Optional[str] = None,
+                         image_confidence: Optional[float] = None,
+                         sensor_confidence: Optional[float] = None,
+                         sensor_raw_json: Optional[str] = None,
+                         video_time_seconds: Optional[float] = None) -> int:
+        sql = """INSERT INTO detections
+                    (frame_id, label, confidence, x, y, width, height,
+                     video_time_seconds, source, image_confidence, sensor_confidence, sensor_raw_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
         with self._get_conn() as conn:
-            cursor = conn.execute(sql, (frame_id, label, confidence, x, y, width, height))
+            cursor = conn.execute(sql, (
+                frame_id, label, confidence, x, y, width, height,
+                video_time_seconds, source, image_confidence, sensor_confidence, sensor_raw_json,
+            ))
             return cursor.lastrowid
 
     def insert_many(self, records: list[dict]) -> int:
-        """Bulk insert detections. Each dict must have frame_id, label, confidence, x, y, width, height."""
-        sql = """INSERT INTO detections (frame_id, label, confidence, x, y, width, height)
-                 VALUES (:frame_id, :label, :confidence, :x, :y, :width, :height)"""
+        """Bulk insert detections.
+
+        Each dict must have frame_id, label, confidence, x, y, width, height.
+        The video time and multimodal fields are optional and default to NULL
+        when absent.
+        """
+        sql = """INSERT INTO detections
+                    (frame_id, label, confidence, x, y, width, height,
+                     video_time_seconds, source, image_confidence, sensor_confidence, sensor_raw_json)
+                 VALUES (:frame_id, :label, :confidence, :x, :y, :width, :height,
+                         :video_time_seconds, :source, :image_confidence, :sensor_confidence, :sensor_raw_json)"""
+        optional_defaults = dict.fromkeys((*MULTIMODAL_COLUMNS, "video_time_seconds"), None)
+        normalized = [{**optional_defaults, **record} for record in records]
         with self._get_conn() as conn:
-            conn.executemany(sql, records)
+            conn.executemany(sql, normalized)
             return len(records)
 
-    def get_detections(self, label: Optional[str] = None,
-                       min_confidence: Optional[float] = None,
-                       min_id: Optional[int] = None,
-                       max_id: Optional[int] = None,
-                       limit: Optional[int] = None) -> list[dict]:
+    @staticmethod
+    def _build_where(label: Optional[str] = None,
+                     min_confidence: Optional[float] = None,
+                     max_confidence: Optional[float] = None,
+                     min_video_time: Optional[float] = None,
+                     max_video_time: Optional[float] = None,
+                     min_id: Optional[int] = None,
+                     max_id: Optional[int] = None) -> tuple[str, list]:
         conditions = []
         params: list = []
         if label:
@@ -125,6 +193,15 @@ class SQLiteClient:
         if min_confidence is not None:
             conditions.append("confidence >= ?")
             params.append(min_confidence)
+        if max_confidence is not None:
+            conditions.append("confidence <= ?")
+            params.append(max_confidence)
+        if min_video_time is not None:
+            conditions.append("video_time_seconds >= ?")
+            params.append(min_video_time)
+        if max_video_time is not None:
+            conditions.append("video_time_seconds <= ?")
+            params.append(max_video_time)
         if min_id is not None:
             conditions.append("id > ?")
             params.append(min_id)
@@ -133,8 +210,26 @@ class SQLiteClient:
             params.append(max_id)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        return where, params
+
+    def get_detections(self, label: Optional[str] = None,
+                       min_confidence: Optional[float] = None,
+                       max_confidence: Optional[float] = None,
+                       min_video_time: Optional[float] = None,
+                       max_video_time: Optional[float] = None,
+                       min_id: Optional[int] = None,
+                       max_id: Optional[int] = None,
+                       limit: Optional[int] = None,
+                       offset: Optional[int] = None) -> list[dict]:
+        where, params = self._build_where(
+            label, min_confidence, max_confidence, min_video_time,
+            max_video_time, min_id, max_id,
+        )
         limit_clause = f"LIMIT {int(limit)}" if limit else ""
-        sql = f"SELECT * FROM detections {where} ORDER BY confidence DESC {limit_clause}"
+        if limit and offset:
+            limit_clause += f" OFFSET {int(offset)}"
+        sql = (f"SELECT * FROM detections {where} "
+               f"ORDER BY confidence DESC, id ASC {limit_clause}")
 
         with self._get_conn() as conn:
             rows = conn.execute(sql, params).fetchall()
@@ -262,6 +357,19 @@ class SQLiteClient:
             },
         }
 
+    @staticmethod
+    def _percentile(sorted_values: list[float], p: float) -> float:
+        """Nearest-rank percentile (p in (0, 100]) over an already-sorted list."""
+        n = len(sorted_values)
+        rank = min(n, max(1, math.ceil(p / 100 * n)))
+        return sorted_values[rank - 1]
+
+    def count_detections(self, **filters) -> int:
+        """Number of rows matching the same filters accepted by get_detections()."""
+        where, params = self._build_where(**filters)
+        with self._get_conn() as conn:
+            return conn.execute(f"SELECT COUNT(*) FROM detections {where}", params).fetchone()[0]
+
     def get_summary(self, min_id: Optional[int] = None,
                     max_id: Optional[int] = None) -> dict:
         """Return per-class detection counts and confidence stats.
@@ -271,15 +379,7 @@ class SQLiteClient:
         analysis run, instead of always aggregating the entire (potentially
         unbounded, ever-growing) detection history.
         """
-        conditions = []
-        params: list = []
-        if min_id is not None:
-            conditions.append("id > ?")
-            params.append(min_id)
-        if max_id is not None:
-            conditions.append("id <= ?")
-            params.append(max_id)
-        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        where, params = self._build_where(min_id=min_id, max_id=max_id)
 
         sql = f"""
         SELECT label,
@@ -292,9 +392,23 @@ class SQLiteClient:
         GROUP BY label
         ORDER BY count DESC
         """
+        confidence_sql = f"""
+        SELECT label, confidence
+        FROM detections
+        {where}
+        ORDER BY label, confidence
+        """
         with self._get_conn() as conn:
-            rows = conn.execute(sql, params).fetchall()
-        return {"by_class": [dict(r) for r in rows]}
+            rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+            confidences_by_label: dict[str, list[float]] = {}
+            for r in conn.execute(confidence_sql, params).fetchall():
+                confidences_by_label.setdefault(r["label"], []).append(r["confidence"])
+
+        for row in rows:
+            values = confidences_by_label.get(row["label"], [])
+            row["p90_confidence"] = self._percentile(values, 90) if values else None
+            row["p99_confidence"] = self._percentile(values, 99) if values else None
+        return {"by_class": rows}
 
     def get_max_id(self) -> int:
         """Return the highest detection id currently stored (0 if empty)."""

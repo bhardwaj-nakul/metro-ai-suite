@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Host-side dependencies for scripts/download_and_prep_data.py.
+# Installed into a local virtual environment by `make prepare-data`.
+opencv-python-headless==4.14.0.94
+imageio-ffmpeg==0.8.1

@@ -3,3 +3,9 @@ uvicorn[standard]==0.49.0
 pydantic==2.13.4
 paho-mqtt==2.1.0
 requests==2.34.2
+
+# Multimodal (image + sensor) sensor-branch classification and late-fusion
+# support (src/utility/fusion.py, sensor_classifier.py). The image branch runs
+# in the DL Streamer Pipeline Server container, so no OpenCV is needed here.
+numpy==2.2.6
+openvino==2026.3.0

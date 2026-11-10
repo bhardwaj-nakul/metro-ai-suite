@@ -1,0 +1,36 @@
+{
+  "SPDX-FileCopyrightText": "(C) 2026 Intel Corporation",
+  "SPDX-License-Identifier": "Apache-2.0",
+  "schemaVersion": "1.0",
+  "description": "Harness-neutral discovery catalog for Virtual Security Guard Agent workflow skills. Paths are relative to the app root (sample-applications/virtual-security-guard-agent).",
+  "skillsRoot": ".github/skills",
+  "skills": [
+    {
+      "name": "vsg-dev",
+      "path": ".github/skills/vsg-dev/SKILL.md",
+      "description": "Develop, run, test, build, deploy and debug the VSG UI (Argus console over Hermes and VSS), including the nginx allowlist gateway, Zustand stores, the vsg-* directive protocol and reinstalling the Hermes skills.",
+      "triggers": [
+        "run the vsg ui",
+        "start argus ui",
+        "dev mock",
+        "add a feature to vsg",
+        "argus reply not shown",
+        "add a vss route",
+        "add a hermes route",
+        "change the argus protocol",
+        "redeploy vsg-ui",
+        "vsg ui bug",
+        "react error 185"
+      ],
+      "requires": [
+        "Makefile",
+        "deploy/compose.yaml",
+        "deploy/.env",
+        "ui/package.json",
+        "ui/nginx/templates/default.conf.template",
+        "npm",
+        "docker compose"
+      ]
+    }
+  ]
+}

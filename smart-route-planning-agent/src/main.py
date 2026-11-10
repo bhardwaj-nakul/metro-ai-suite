@@ -367,6 +367,17 @@ def create_gradio_interface() -> gr.Blocks:
                         elem_classes=["map-container"],
                     )
 
+        # Documentation QR code (bottom of the page)
+        gr.HTML(
+            value="""
+            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 0;text-align:center">
+              <h3 style="margin:0 0 8px 0;font-size:14px">Scan for Documentation</h3>
+              <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUgAAAFIAQMAAAAI2vVwAAAABlBMVEUAAAD///+l2Z/dAAAAAnRSTlP//8i138cAAAAJcEhZcwAACxIAAAsSAdLdfvwAAAGySURBVGiB7dXBjgIxDAPQ/P9PZ0VjJxmtQC6H3YuLGDrtGw5uCJHqCEvL/5BR49y8Ps5SfZwV7FqqEsFGzeqZnkbHbqnKV7Lbz8qaW17Kc101O9Vt+Y1E1DSR78/I8qPEWiRbLlNfFW4pyxr55oVdS1X2YNz1MKaza6lJ5B7xDJp518tSl4kZ+kD0wB6OwVKVJ3hU9a7eOhB8g6UqAfHz74dzjmNq3lKSj2vRxEJ9k6Uss7oASxkP1wpv01KWNWV/CMzp585SlPXbn+2asrB/faHlZzkxZwef82CuMreUJNInROq524GlLivedbOe7uq2VCUqlX9T2YCb6wQsBcmYO+3Wwcq21GUyeYadJL3Vb0tBMtvJOnEMwWMIyxvJCp6UuV6TtNQlkg4WMdeC6XdnsNQkC3cKeDpuYtVSl9HXag+4oL55BpayfFxY2aue0/JKBteYcdXz6guWsuSYjBuwni0vZC8nugDCx3nknIelJFewNRuPs0jLG4mM0QkApqJrwfJe4j3FnGwPll/I9quGu8QtZYl+EAgbiU+XmM5gKUj+/mNqmCcx3cFSleKwtPx7+QP4lMvMrGBj4AAAAABJRU5ErkJggg==" style="width:140px;height:140px" alt="QR code linking to the smart route planning agent documentation"/>
+              <a href="https://docs.openedgeplatform.intel.com/dev/edge-ai-suites/smart-route-planning-agent/index.html" target="_blank" rel="noopener noreferrer" style="margin-top:8px;font-size:12px">Smart Route Planning Agent Documentation</a>
+            </div>
+            """
+        )
+
         # Augment the functions with route_service dependency using partial, as gradio event handlers only accept UI components.
         get_direct_route_partial = partial(
             get_direct_route, route_service=route_service

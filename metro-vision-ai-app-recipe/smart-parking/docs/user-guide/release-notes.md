@@ -1,5 +1,24 @@
 # Release Notes: Smart Parking
 
+## Version 1.7.0
+
+**New**:
+
+- Added support for Ubuntu 26.04 LTS
+- Added a new application flow with Scenescape based object tracking.
+- Added a QR code to the Grafana dashboard that links to the documentation.
+
+**Removed**:
+
+- Removed helm deployment.
+
+**Improved**:
+
+- More useful hardware telemetry details shown in the system performance dashboard panel in Grafana.
+- Improved the security context by adding authentication to Node-RED container.
+- Stability and robustness improvements in the script that calculates stream density.
+- Consumed the latest DL Streamer version 2026.3.0.
+
 ## Version 1.6.0
 
 **Release Date**: September 10, 2026
@@ -14,6 +33,7 @@
 
 - Improved the security context of Grafana and Node-RED containers.
 - Consumed the latest DL Streamer version 2026.2.0.
+- Consumed the latest Scenescape version 2026.3.0.
 
 ## Version 1.5.0
 

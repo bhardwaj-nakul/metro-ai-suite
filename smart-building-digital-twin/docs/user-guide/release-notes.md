@@ -4,4 +4,4 @@
 
 **Release Date**: TBD
 
-This is the initial release of the Smart Building Digital Twin.
+This is the initial release of the Smart Building Digital Twin sample application.

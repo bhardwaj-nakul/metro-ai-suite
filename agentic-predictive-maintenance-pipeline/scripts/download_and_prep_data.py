@@ -10,7 +10,7 @@ the blueprint-specific changes are:
 
   1. ``--use-case`` flag selects the use case (default: pipeline-defect-detection)
   2. The generated sample video is placed at
-     ``apps/<use-case>/resources/videos/datastream.mp4`` so DL Streamer can read
+     ``apps/<dir>/resources/videos/datastream.mp4`` so DL Streamer can read
      it immediately after running this script.
   3. Training data is written to ``datasets/<use_case>/`` (YOLO format).
 
@@ -28,6 +28,9 @@ Supported use cases
         datasets/gas_detection/images/train/{class}/
         datasets/gas_detection/images/val/
         datasets/gas_detection/sensor_data/
+      Creates the inference video + frame-index -> filename manifest at:
+        apps/gas-detection-multimodal/resources/videos/datastream.mp4
+        datasets/gas_detection/images/val/frame_manifest.json
 
 DISCLAIMER:
     By using this script you are solely responsible for ensuring you have the
@@ -47,11 +50,17 @@ Usage
 
   # Custom split ratio
   python scripts/download_and_prep_data.py "<url>" --train-ratio 0.8
+
+  # Transcode a manually-dropped-in video (see videos/README.md) to
+  # browser-playable H.264/faststart in place, without downloading anything
+  python scripts/download_and_prep_data.py --transcode-video \\
+      apps/pipeline-defect-detection/resources/videos/datastream.mp4
 """
 
 import argparse
 import json
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -78,6 +87,14 @@ _USE_CASE_MAP = {
     "pipeline-defect-detection": "pipeline_defect_detection",
     "gas-detection":             "gas_detection",
     # extend for new use cases (e.g. "weld-defect-detection": "weld_defect_detection")
+}
+
+# Maps CLI use-case names → the apps/<dir> directory the video is written under.
+# Not always identical to the use-case name itself (use case "gas-detection"
+# lives in apps/gas-detection-multimodal/).
+_APP_DIR_MAP = {
+    "pipeline-defect-detection": "pipeline-defect-detection",
+    "gas-detection":             "gas-detection-multimodal",
 }
 
 
@@ -247,20 +264,165 @@ def prep_gas_detection(download_dir: Path, output_dir: Path,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Video creation
+# Video creation / transcoding
 # ─────────────────────────────────────────────────────────────────────────────
 
-def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30) -> bool:
-    """Build an MP4 from all .jpg images in *images_dir* and write to *video_path*."""
-    if cv2 is None:
-        print("   ⚠️  opencv-python not installed — skipping video creation.")
-        print("       Install with: pip install opencv-python")
+# Codecs the ui-service's <video> tag (and most browsers) can decode natively.
+# Anything else gets re-encoded to H.264 below — this is the single place
+# that transcoding happens; the ui-service just serves files from VIDEOS_DIR
+# as-is and relies on this script having already made them browser-playable.
+_BROWSER_SAFE_CODECS = {"h264", "hevc", "vp8", "vp9", "av1"}
+
+
+_FFMPEG_EXE = None
+
+
+def get_ffmpeg_exe():
+    """Return a path to an ffmpeg binary, or None if none is available.
+
+    Uses ffmpeg from PATH when present; otherwise falls back to the static
+    binary bundled with the ``imageio-ffmpeg`` package (installed by
+    ``make prepare-data`` from ``scripts/requirements.txt``).
+    """
+    global _FFMPEG_EXE
+    if _FFMPEG_EXE:
+        return _FFMPEG_EXE
+
+    exe = shutil.which("ffmpeg")
+    if exe is None:
+        try:
+            import imageio_ffmpeg
+            exe = imageio_ffmpeg.get_ffmpeg_exe()
+        except (ImportError, RuntimeError) as e:
+            print(f"   ⚠️  ffmpeg not found on PATH and no bundled ffmpeg available: {e}")
+            print("      Run 'make prepare-data', or install ffmpeg (e.g. 'sudo apt install ffmpeg').")
+            return None
+    _FFMPEG_EXE = exe
+    return exe
+
+
+def probe_video_codec(video_path: Path):
+    """Return *video_path*'s first video stream's codec name, or None if unknown.
+
+    Parses ``ffmpeg -i`` output so it works with a bundled ffmpeg that ships
+    without ffprobe.
+    """
+    ffmpeg = get_ffmpeg_exe()
+    if ffmpeg is None:
+        return None
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-i", str(video_path)],
+            capture_output=True, check=False, shell=False, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(r"Stream #\S+: Video: (\w+)", result.stderr.decode(errors="replace"))
+    return match.group(1) if match else None
+
+
+def repack_to_h264(video_path: Path, crf: str = "15", preset: str = "slow") -> bool:
+    """Re-encode *video_path* to H.264 + faststart, in place.
+
+    Used for both cv2-written videos (always MPEG-4 Part 2, needs this to be
+    playable in a browser at all) and manually dropped-in videos. Uses a
+    near-lossless CRF by default so DL Streamer inference results aren't
+    perceptibly shifted near detection-confidence threshold cutoffs — pass a
+    faster/lossier preset only if this file is never used for inference.
+    """
+    ffmpeg = get_ffmpeg_exe()
+    if ffmpeg is None:
+        print("   ❌ ffmpeg unavailable — video is not browser-playable.")
         return False
 
+    tmp_path = video_path.with_suffix(".faststart.mp4")
+    try:
+        ret = subprocess.run(
+            [ffmpeg, "-y", "-i", str(video_path),
+             "-c:v", "libx264", "-preset", preset, "-crf", crf,
+             "-pix_fmt", "yuv420p", "-an",
+             "-movflags", "+faststart", str(tmp_path)],
+            capture_output=True,
+            check=False,
+            shell=False,
+        )
+        if ret.returncode == 0:
+            tmp_path.replace(video_path)
+            return True
+        tmp_path.unlink(missing_ok=True)
+        print("   ❌ ffmpeg H.264/faststart repack failed — video is not browser-playable.")
+        print(ret.stderr.decode(errors="replace")[-300:])
+        return False
+    except OSError as e:
+        print(f"   ❌ Could not run ffmpeg: {e}")
+        return False
+
+
+def transcode_existing_video(video_path: Path) -> bool:
+    """Transcode an existing/manually-dropped-in video to H.264 in place, if needed.
+
+    Used for the ``--transcode-video`` CLI mode so a video someone places
+    directly at e.g. ``apps/<app>/resources/videos/datastream.mp4`` (per that
+    directory's README) gets the same one-time H.264/faststart repack that
+    ``create_video_from_images`` applies to script-generated videos, without
+    needing the ui-service to transcode it on demand.
+    """
+    if not video_path.is_file():
+        print(f"❌ {video_path} does not exist.")
+        return False
+
+    codec = probe_video_codec(video_path)
+    if codec in _BROWSER_SAFE_CODECS:
+        print(f"✅ {video_path} is already browser-playable (codec={codec}) — nothing to do.")
+        return True
+
+    print(f"🎬 Transcoding {video_path} (codec={codec}) to H.264/faststart...")
+    if repack_to_h264(video_path):
+        print(f"   ✅ {video_path} is now browser-playable.")
+        return True
+    return False
+
+
+def list_images_sorted(images_dir: Path) -> list:
+    """Return all .jpg (falling back to .png) images in *images_dir*, sorted by name.
+
+    This is the single source of truth for "frame order" — both video creation
+    and the frame-index → filename manifest must iterate this same list so a
+    DL Streamer frame id can be reliably mapped back to its source image.
+    """
     image_files = sorted(images_dir.glob("*.jpg"))
     if not image_files:
-        # Try png fallback
         image_files = sorted(images_dir.glob("*.png"))
+    return image_files
+
+
+def write_frame_manifest(image_files: list, manifest_path: Path) -> None:
+    """Write a frame_index -> filename JSON manifest for *image_files* (in order).
+
+    Lets a later stage join a DL Streamer pipeline's per-frame results (only a
+    frame id, no filename) back to the original image filename (e.g. to re-join
+    per-sample sensor CSV rows keyed by filename).
+    """
+    manifest = {str(i): f.name for i, f in enumerate(image_files)}
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    print(f"   ✅ {manifest_path}  ({len(manifest)} frames)")
+
+
+def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30,
+                             manifest_path: Path = None) -> bool:
+    """Build an MP4 from all .jpg images in *images_dir* and write to *video_path*.
+
+    If *manifest_path* is given, also writes a frame_index -> filename JSON
+    manifest (see ``write_frame_manifest``) using the exact same sorted file
+    order the video frames are written in.
+    """
+    if cv2 is None:
+        print("   ⚠️  opencv-python not installed — skipping video creation.")
+        print("       Run 'make prepare-data', or install it with: sudo apt install python3-opencv")
+        return False
+
+    image_files = list_images_sorted(images_dir)
     if not image_files:
         print(f"   ⚠️  No images found in {images_dir} — skipping video creation.")
         return False
@@ -279,39 +441,44 @@ def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30) 
         fps,
         (w, h),
     )
-    written = 0
+    if not writer.isOpened():
+        print(f"   ❌ Could not open {video_path} for writing (check directory permissions).")
+        return False
+
+    # Only frames actually written to the video go into the manifest, so a
+    # frame index always maps to the image that produced that frame.
+    written_files = []
     for img_file in image_files:
         frame = cv2.imread(str(img_file))
         if frame is not None:
             if frame.shape[:2] != (h, w):
                 frame = cv2.resize(frame, (w, h))
             writer.write(frame)
-            written += 1
+            written_files.append(img_file)
     writer.release()
+    written = len(written_files)
 
-    # cv2 mp4v writer places the moov atom at the end of the file.
-    # GStreamer qtdemux only scans the first 10 MB, so it fails to find moov.
-    # Repack with ffmpeg -movflags +faststart to move moov to the front.
-    tmp_path = video_path.with_suffix(".faststart.mp4")
-    try:
-        ret = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video_path), "-c", "copy",
-             "-movflags", "+faststart", str(tmp_path)],
-            capture_output=True,
-            check=False,
-            shell=False,
-        )
-        if ret.returncode == 0:
-            tmp_path.replace(video_path)
-        else:
-            tmp_path.unlink(missing_ok=True)
-            print("   ⚠️  ffmpeg faststart repack failed — video may not stream correctly.")
-            print(ret.stderr.decode(errors="replace")[-300:])
-    except (FileNotFoundError, OSError):
-        print("   ⚠️  ffmpeg not found — video may not stream correctly.")
-        print("      Install ffmpeg to optimize video streaming.")
+    if not video_path.is_file() or video_path.stat().st_size == 0:
+        print(f"   ❌ Video was not written to {video_path}.")
+        return False
+
+    # cv2's mp4v writer uses MPEG-4 Part 2 (not H.264) and places the moov
+    # atom at the end of the file. Browsers' <video> tag can't decode
+    # MPEG-4 Part 2 at all (only used for the GStreamer/DL Streamer
+    # pipeline), and GStreamer qtdemux only scans the first 10 MB, so it
+    # fails to find a trailing moov. repack_to_h264 fixes both: re-encode
+    # to H.264 (universally playable, still fine for DL Streamer) with
+    # +faststart (moov moved to the front for streaming). This same file is
+    # used both for DL Streamer inference and for the browser Camera Preview
+    # (so overlay timing always matches what was actually detected), hence
+    # the near-lossless default CRF.
+    if not repack_to_h264(video_path):
+        return False
 
     print(f"   ✅ {video_path}  ({written} frames @ {fps} fps, {written/fps:.1f}s)")
+
+    if manifest_path is not None:
+        write_frame_manifest(written_files, manifest_path)
     return True
 
 
@@ -321,12 +488,24 @@ def create_video_from_images(images_dir: Path, video_path: Path, fps: int = 30) 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Download and prepare a dataset for Agentic Predictive Maintenance for Critical Infrastructure",
+        description="Download and prepare a dataset for Agentic Predictive Maintenance",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "dataset_url",
-        help="URL of the dataset zip to download",
+        nargs="?",
+        default=None,
+        help="URL of the dataset zip to download (not required with --transcode-video)",
+    )
+    parser.add_argument(
+        "--transcode-video",
+        metavar="VIDEO_PATH",
+        help=(
+            "Skip the download/prep flow and just transcode an existing/"
+            "manually-dropped-in video (e.g. a datastream.mp4 placed by hand "
+            "per videos/README.md) to H.264/faststart in place, then exit. "
+            "No-op if it's already browser-playable."
+        ),
     )
     parser.add_argument(
         "--use-case",
@@ -354,16 +533,23 @@ def main():
 
     args = parser.parse_args()
 
+    if args.transcode_video:
+        sys.exit(0 if transcode_existing_video(Path(args.transcode_video)) else 1)
+
+    if not args.dataset_url:
+        parser.error("dataset_url is required unless --transcode-video is given")
+
     use_case_id = _USE_CASE_MAP[args.use_case]
     output_dir  = Path("datasets") / use_case_id
     download_dir = output_dir / "_raw_download"
+    app_dir_name = _APP_DIR_MAP[args.use_case]
 
     # Blueprint: video output goes directly into the DL Streamer resources dir
-    video_output_path = Path("apps") / args.use_case / "resources" / "videos" / "datastream.mp4"
+    video_output_path = Path("apps") / app_dir_name / "resources" / "videos" / "datastream.mp4"
 
     print(DISCLAIMER)
     print("=" * 70)
-    print("Agentic Predictive Maintenance for Critical Infrastructure — Dataset Download & Prepare")
+    print("Agentic Predictive Maintenance — Dataset Download & Prepare")
     print("=" * 70)
     print(f"  Use case:    {args.use_case}")
     print(f"  Dataset dir: {output_dir}")
@@ -374,9 +560,19 @@ def main():
     print()
 
     # ── Gas detection ─────────────────────────────────────────────────────────
-    if args.use_case == "gas-detection":
+    if use_case_id == "gas_detection":
+        manifest_path = output_dir / "images" / "val" / "frame_manifest.json"
         if output_dir.exists() and (output_dir / "images" / "val").exists():
             print(f"✅ Dataset already at {output_dir} — skipping download.")
+            if not video_output_path.exists() or not manifest_path.exists():
+                print("🎬 Creating video + frame manifest from existing val images...")
+                if not create_video_from_images(
+                    output_dir / "images" / "val", video_output_path,
+                    manifest_path=manifest_path,
+                ):
+                    sys.exit("❌ Failed to create the gas-detection video + frame manifest.")
+            elif not transcode_existing_video(video_output_path):
+                sys.exit("❌ Existing gas-detection video is not browser-playable.")
             return
 
         download_dataset(args.dataset_url, download_dir, "gas-dataset.zip")
@@ -387,11 +583,23 @@ def main():
         if not args.keep_download:
             shutil.rmtree(download_dir, ignore_errors=True)
 
+        # Create sample video (+ frame-index -> filename manifest for later
+        # sensor-fusion re-joining) for DL Streamer inference.
+        print("🎬 Creating video + frame manifest for DL Streamer inference...")
+        if not create_video_from_images(
+            output_dir / "images" / "val", video_output_path,
+            manifest_path=manifest_path,
+        ):
+            sys.exit("❌ Failed to create the gas-detection video + frame manifest.")
+        print()
+
         print("=" * 70)
         print("✅ Dataset ready!")
         print(f"  📁 {output_dir}/images/train/{{class}}/  ({n_train} images)")
         print(f"  📁 {output_dir}/images/val/             ({n_val} images)")
         print(f"  📁 {output_dir}/sensor_data/")
+        print(f"  🎬 {video_output_path}  ← DL Streamer sample video")
+        print(f"  🗺️  {manifest_path}  ← frame-index → filename manifest")
         print()
         return
 
@@ -401,7 +609,10 @@ def main():
         # Still create video if missing
         if not video_output_path.exists():
             print("🎬 Creating video from existing val images...")
-            create_video_from_images(output_dir / "images" / "val", video_output_path)
+            if not create_video_from_images(output_dir / "images" / "val", video_output_path):
+                sys.exit("❌ Failed to create the sample video.")
+        elif not transcode_existing_video(video_output_path):
+            sys.exit("❌ Existing sample video is not browser-playable.")
         return
 
     download_dataset(args.dataset_url, download_dir, "pipeline-defect-dataset.zip")
@@ -437,7 +648,8 @@ def main():
 
     # Create sample video for DL Streamer
     print("🎬 Creating sample video for DL Streamer inference...")
-    create_video_from_images(output_dir / "images" / "val", video_output_path)
+    if not create_video_from_images(output_dir / "images" / "val", video_output_path):
+        sys.exit("❌ Failed to create the sample video.")
     print()
 
     if not args.keep_download:

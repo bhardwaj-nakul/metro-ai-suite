@@ -1,0 +1,62 @@
+{
+  "skill_name": "vsg-dev",
+  "evals": [
+    {
+      "id": 1,
+      "prompt_file": "example-prompts/01-argus-reply-not-shown.md",
+      "prompt": "Argus answered my report request but nothing shows up in the VSG UI. Fix it.",
+      "expected_output": "Checks gateway health, reads the Hermes transcript without printing the API key, confirms whether a valid vsg-report block exists, tests parsing with parseAgentText, then fixes rendering or ordering in Turns.tsx/MessageList.tsx, verifies with lint/tsc/vitest/build and redeploys.",
+      "files": [],
+      "expectations": [
+        "Resolves the app root correctly (metro-ai-suite/virtual-security-guard-agent or the repo root), not sample-applications/.",
+        "Runs or plans the three health probes (/healthz, /hermes/health, /vss/manager/health) on the UI port.",
+        "Reads /api/sessions and /api/sessions/<id>/messages to inspect the raw assistant reply.",
+        "Never echoes or commits HERMES_API_KEY.",
+        "Distinguishes a parsing problem (parseAgentText) from a rendering/state problem before editing.",
+        "Verification includes tsc, eslint, vitest and Playwright e2e from ui/.",
+        "Does not git add, commit or stash."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt_file": "example-prompts/02-add-vss-route.md",
+      "prompt": "Let the VSG UI call the VSS GET /manager/tags endpoint from a new filter dropdown.",
+      "expected_output": "Adds the call to the VSS adapter and its mock, confirms or adds a strict-regex nginx allowlist entry and dev proxy coverage, uses a stable Zustand/TanStack selector, adds SPDX headers to new files, and verifies.",
+      "files": [],
+      "expectations": [
+        "Edits ui/src/adapters/vss/http.ts and keeps ui/src/adapters/vss/mock.ts in sync.",
+        "Notices that /vss/manager/tags is already in the nginx allowlist instead of adding a duplicate location.",
+        "Avoids selectors that return new arrays/objects each render.",
+        "Labels the control as camera(s), not tags, in the UI.",
+        "Verification includes tsc, eslint, vitest and Playwright e2e from ui/."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt_file": "example-prompts/03-change-argus-behaviour.md",
+      "prompt": "Make Argus summarise confirmed sightings in a table before offering the live search.",
+      "expected_output": "Updates protocol/instructions.ts, hermes-skills/virtual-security-guard/SKILL.md and .github/skills/vsg-dev/references/protocol.md together, and explains that the skills must be reinstalled on the Hermes host with make install-skills.",
+      "files": [],
+      "expectations": [
+        "Updates ui/src/protocol/instructions.ts (and its test).",
+        "Updates hermes-skills/virtual-security-guard/SKILL.md.",
+        "Updates .github/skills/vsg-dev/references/protocol.md when the flow changes.",
+        "Tells the user to run make install-skills (with INSTALL_ARGS=--exclusive) on the Hermes host and start a new Hermes session.",
+        "Does not reintroduce a live-search offer card or have Argus start a live watch."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt_file": "example-prompts/04-reintroduce-removed-feature.md",
+      "prompt": "Operators keep asking for a way to dismiss wrong live hits. Add a Reject button next to Confirm on the live timeline, and bring back the \"All cameras\" picker in the composer while you're at it.",
+      "expected_output": "Recognises both as features removed on purpose (no reject for live hits; composer pickers removed in favour of naming cameras in the prompt), pushes back before editing, explains why, and proposes the simplest alternative or asks the user to confirm reversing the decision.",
+      "files": [],
+      "expectations": [
+        "Identifies that reject for live hits was removed on purpose.",
+        "Identifies that the composer 'All cameras' picker was removed on purpose.",
+        "Does not implement either change without the user confirming the reversal.",
+        "Offers a simpler alternative or asks one focused question."
+      ]
+    }
+  ]
+}

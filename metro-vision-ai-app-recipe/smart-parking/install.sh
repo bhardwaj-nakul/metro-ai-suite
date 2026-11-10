@@ -122,7 +122,7 @@ docker run --rm --user=root \
   -e http_proxy -e https_proxy -e no_proxy \
   -e YOLOV11S_DOWNLOAD_CONFIRMED=1 \
   -v "${APP_DIR}:/opt/project" \
-   intel/dlstreamer:2026.2.0-ubuntu24 bash -c "$(cat <<EOF
+   intel/dlstreamer:2026.3.0-ubuntu24-rc1 bash -c "$(cat <<EOF
 
 cd /opt/project
 export HOST_IP="${1:-$(hostname -I | cut -f1 -d' ')}"

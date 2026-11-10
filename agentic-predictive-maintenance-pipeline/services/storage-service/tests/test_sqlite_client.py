@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import sqlite3
 import uuid
 import pytest
 
@@ -30,11 +31,39 @@ def db():
 
 
 def test_insert_and_query(db):
-    db.insert_detection(1, "Rupture", 0.9, 10, 20, 50, 40)
+    db.insert_detection(1, "Rupture", 0.9, 10, 20, 50, 40, video_time_seconds=1.25)
     results = db.get_detections()
     assert len(results) == 1
     assert results[0]["label"] == "Rupture"
     assert results[0]["confidence"] == pytest.approx(0.9)
+    assert results[0]["video_time_seconds"] == pytest.approx(1.25)
+    assert results[0]["detection_timestamp"]
+
+
+def test_legacy_timestamp_migrates_to_detection_timestamp(tmp_path):
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("""CREATE TABLE detections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            frame_id INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            x REAL NOT NULL,
+            y REAL NOT NULL,
+            width REAL NOT NULL,
+            height REAL NOT NULL,
+            timestamp TEXT DEFAULT (datetime('now'))
+        )""")
+        conn.execute(
+            "INSERT INTO detections (frame_id, label, confidence, x, y, width, height, timestamp) "
+            "VALUES (1, 'Rupture', 0.9, 10, 20, 50, 40, '2026-01-01T00:00:00')"
+        )
+
+    client = SQLiteClient(str(path))
+    row = client.get_detections()[0]
+    assert row["detection_timestamp"] == "2026-01-01T00:00:00"
+    assert row["video_time_seconds"] is None
+    assert "timestamp" not in row
 
 
 def test_insert_many(db):
@@ -46,6 +75,53 @@ def test_insert_many(db):
     count = db.insert_many(records)
     assert count == 5
     assert db.count() == 5
+
+
+def test_insert_detection_with_multimodal_fields(db):
+    """Multimodal (image + sensor fusion) results carry no bounding box but
+    do carry per-branch confidences and a raw sensor reading."""
+    db.insert_detection(
+        1, "Smoke", 0.97, 0.0, 0.0, 0.0, 0.0,
+        source="gas_detection_multimodal",
+        image_confidence=0.95,
+        sensor_confidence=0.99,
+        sensor_raw_json='{"MQ2": 1.2, "MQ3": 0.8}',
+    )
+    results = db.get_detections()
+    assert len(results) == 1
+    row = results[0]
+    assert row["source"] == "gas_detection_multimodal"
+    assert row["image_confidence"] == pytest.approx(0.95)
+    assert row["sensor_confidence"] == pytest.approx(0.99)
+    assert row["sensor_raw_json"] == '{"MQ2": 1.2, "MQ3": 0.8}'
+
+
+def test_insert_detection_multimodal_fields_default_to_null(db):
+    """Plain video defect detections (no multimodal args passed) leave the
+    additive columns NULL rather than erroring or requiring a value."""
+    db.insert_detection(1, "Rupture", 0.9, 10, 20, 50, 40)
+    row = db.get_detections()[0]
+    assert row["source"] is None
+    assert row["image_confidence"] is None
+    assert row["sensor_confidence"] is None
+    assert row["sensor_raw_json"] is None
+
+
+def test_insert_many_mixed_multimodal_and_plain_records(db):
+    """insert_many accepts a mix of records with and without multimodal keys."""
+    records = [
+        {"frame_id": 1, "label": "Rupture", "confidence": 0.9,
+         "x": 1, "y": 1, "width": 10, "height": 10},
+        {"frame_id": 2, "label": "Smoke", "confidence": 0.97,
+         "x": 0, "y": 0, "width": 0, "height": 0,
+         "source": "gas_detection_multimodal", "image_confidence": 0.95,
+         "sensor_confidence": 0.99, "sensor_raw_json": "{}"},
+    ]
+    count = db.insert_many(records)
+    assert count == 2
+    rows = {r["frame_id"]: r for r in db.get_detections()}
+    assert rows[1]["source"] is None
+    assert rows[2]["source"] == "gas_detection_multimodal"
 
 
 def test_filter_by_label(db):

@@ -1,0 +1,53 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Sourced by /docker-entrypoint.sh before the templates are rendered.
+# Validates and normalises the upstream settings so a bad value fails the
+# container at start instead of producing a broken or injectable nginx config.
+
+vsg_fail() {
+  echo "vsg: $*" >&2
+  exit 1
+}
+
+# Prints scheme://host[:port] with any trailing slash removed, or fails.
+vsg_upstream() {
+  value="${2%/}"
+  [ -n "$value" ] || vsg_fail "$1 is not set"
+  printf '%s' "$value" | grep -Eq '^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$' ||
+    vsg_fail "$1 must look like http://host:port (got '$value')"
+  printf '%s' "$value"
+}
+
+HERMES_BASE_URL="$(vsg_upstream HERMES_BASE_URL "${HERMES_BASE_URL:-}")" || exit 1
+VSS_BASE_URL="$(vsg_upstream VSS_BASE_URL "${VSS_BASE_URL:-}")" || exit 1
+export HERMES_BASE_URL VSS_BASE_URL
+
+# Prefer a mounted secret file (Compose/Kubernetes secrets) over a plain env var.
+if [ -n "${HERMES_API_KEY_FILE:-}" ]; then
+  [ -r "$HERMES_API_KEY_FILE" ] || vsg_fail "HERMES_API_KEY_FILE '$HERMES_API_KEY_FILE' is not readable"
+  HERMES_API_KEY="$(tr -d '\r\n' < "$HERMES_API_KEY_FILE")"
+  export HERMES_API_KEY
+fi
+
+[ -n "${HERMES_API_KEY:-}" ] || vsg_fail "HERMES_API_KEY (or HERMES_API_KEY_FILE) is not set"
+case "$HERMES_API_KEY" in
+  *[!A-Za-z0-9._~+/=-]*) vsg_fail "HERMES_API_KEY has unexpected characters" ;;
+esac
+[ "${#HERMES_API_KEY}" -ge 8 ] && [ "${#HERMES_API_KEY}" -le 512 ] ||
+  vsg_fail "HERMES_API_KEY must be 8-512 characters"
+
+# Default floorplan: /etc/vsg/floorplans/$VSG_FLOORPLAN.json, mounted from
+# deploy/floorplans/.
+VSG_FLOORPLAN="${VSG_FLOORPLAN:-simple}"
+printf '%s' "$VSG_FLOORPLAN" | grep -Eq '^[A-Za-z0-9_-]{1,64}$' ||
+  vsg_fail "VSG_FLOORPLAN must be a file name without .json, letters, digits, _ or - (got '$VSG_FLOORPLAN')"
+[ -r "/etc/vsg/floorplans/$VSG_FLOORPLAN.json" ] ||
+  vsg_fail "floorplan /etc/vsg/floorplans/$VSG_FLOORPLAN.json is not readable; is deploy/floorplans/ mounted?"
+export VSG_FLOORPLAN
+
+# Only substitute our variables; nginx's own $variables stay untouched.
+export NGINX_ENVSUBST_FILTER='^(HERMES_BASE_URL|HERMES_API_KEY|VSS_BASE_URL|VSG_FLOORPLAN)$'
+
+echo "vsg: Hermes upstream $HERMES_BASE_URL, VSS upstream $VSS_BASE_URL, floorplan $VSG_FLOORPLAN"

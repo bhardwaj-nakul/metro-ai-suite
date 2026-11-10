@@ -58,20 +58,6 @@ An AI analytics web dashboard shows simulated building activity, alerts, camera 
   git lfs install
   ```
 
-## Scenescape Images
-
-Scenescape images are pulled automatically from Docker Hub by `./setup.sh` — no manual build step required. The images used are:
-
-| Image | Tag |
-| --- | --- |
-| `intel/scenescape-manager` | `2026.2.0` |
-| `intel/scenescape-controller` | `2026.2.0` |
-| `intel/scenescape-autocalibration` | `2026.2.0` |
-| `intel/scenescape-analytics` | `2026.2.0` |
-| `intel/dlstreamer-pipeline-server` | `2026.2.0-ubuntu24` |
-
-`setup.sh` automatically downloads the GStreamer plugin scripts (`gstplugins/`) used by the Deep Learning Streamer (DL Streamer), from the Scenescape repository using a sparse shallow clone. Only the `gstplugins/` directory is downloaded; a full repository clone and local image build are not required.
-
 ## Setup
 
 Clone the repository (Git LFS extension is required for scene bundles):
@@ -153,7 +139,6 @@ Key variables in the `.env` file:
 | `DASHBOARD_URL` | `http://$PUBLIC_HOSTNAME:$DASHBOARD_PORT` | Browser URL for the analytics dashboard |
 | `SNAPSHOT_INTERVAL` | `10` | Seconds between narrator snapshots |
 | `DASHBOARD_PORT` | `7000` | Host port for the analytics dashboard |
-| `SCENESCAPE_IMAGE_TAG` | `2026.2.0` | Scenescape image tag pulled from Docker Hub |
 | `MODEL_NAME` | `smartbuilding-int8` | Detection model variant; set to `smartbuilding-fp16` for FP16 |
 
 ## Adding a New Scene

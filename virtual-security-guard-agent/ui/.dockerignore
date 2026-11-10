@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+node_modules
+dist
+coverage
+.env
+.env.*
+!.env.example
+*.local
+.git

@@ -15,14 +15,14 @@ events**, and raises an **alarm** for each one in Smart Client's Alarm Manager.
 
 ```mermaid
 flowchart LR
-  P["Loitering Detection<br/>pipeline"] --> F["mqtt-table-flattener"]
-  F -- "loiterstatus row<br/>(one per loiterer)" --> V["VAP"]
+  P["Loitering Detection App"] 
+  P -- "loiterstatus row<br/>(one per loiterer)" --> V["VAP"]
   V -- "analytics event" --> A["AI Bridge<br/>dls_vision-events"]
   A --> E["XProtect<br/>Event Server"]
   E -- "alarm definition" --> M["Smart Client<br/>Alarm Manager"]
 ```
 
-1. The `mqtt-table-flattener` sidecar publishes a row for each person who has stayed in
+1. The Loitering Detection app publishes a row for each person who has stayed in
    the zone longer than `LOITERING_THRESHOLD_SEC`. It repeats the row about once a
    second while the person stays.
 2. VAP turns each row into an analytics event and posts it to the app's event topic,
@@ -77,8 +77,6 @@ If you change either, recreate the backend:
 docker compose up -d --force-recreate backend
 ```
 
-
-
 ## Step 2: Find the analytics event in Management Client
 
 1. In Management Client, go to **Rules and Events → Analytics Events**.
@@ -107,7 +105,7 @@ If it is missing, restart the VAP backend to register the app again, then check 
 
 3. Click **Save**.
 
-![Alarm definition in Management Client triggering on the Loitering Detection analytics event](../../../_assets/milestone-mc-alarm-definition.png "Alarm definition in Management Client")
+    ![Alarm definition in Management Client triggering on the Loitering Detection analytics event](../../../_assets/milestone-mc-alarm-definition.png "Alarm definition in Management Client")
 
 ## Step 4: View alarms in Smart Client
 
@@ -115,21 +113,15 @@ If it is missing, restart the VAP backend to register the app again, then check 
 2. When someone loiters in the zone, an alarm appears in the list.
 3. Double-click it to see the alarm details and the video around the alarm time.
 
-![Alarm details in Smart Client for a loitering event](../../../_assets/milestone-sc-alarm-details.png "Loitering alarm in Smart Client")
+    ![Alarm details in Smart Client for a loitering event](../../../_assets/milestone-sc-alarm-details.png "Loitering alarm in Smart Client")
 
 The alarm shows the alarm definition's name, the event description under
 **Instructions**, `loitering` as **Type**, and the zone as **Tag**.
 
-<!-- SCREENSHOT TODO: ../../../_assets/milestone-sc-alarm-list.png
-     Smart Client > Alarm Manager tab, with several loitering alarms in the list. -->
-
-AI Bridge creates the analytics event in XProtect when VAP registers the app. The Event
-Server does not always pick up a newly created or recreated event until it restarts;
+AI Bridge creates the analytics event in XProtect when VAP registers the app.
+>NOTE: The Event Server does not always pick up a newly created or recreated event until it restarts;
 until then, events reach XProtect without raising alarms.
 If you do not see the alarms in this step, restart the **Milestone XProtect Event Server** service. Use the Event Server tray icon, or Windows **Services**.
-
-<!-- SCREENSHOT TODO: ../../../_assets/milestone-event-server-restart.png
-     Windows tray: Milestone XProtect Event Server icon menu with "Restart Event Server Service". -->
 
 ## Check the flow
 
@@ -171,3 +163,8 @@ docker compose up -d --no-deps --force-recreate mqtt-table-flattener
 ```
 
 After changing the VAP value, recreate the backend and restart the pipeline.
+
+## Disable alarms
+
+In order to disable the alarm triggered from the events, open XProtect Management Client,
+Go to **Alarms → Alarm Definitions**, uncheck **Enable**. Click **Save**

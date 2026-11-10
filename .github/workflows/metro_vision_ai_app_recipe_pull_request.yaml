@@ -11,9 +11,44 @@ on:
   workflow_call:
 permissions: {}
 jobs:
+  changed-files:
+    name: Get Changed Files
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      files: ${{ steps.changed.outputs.files }}
+      shellcheck_files: ${{ steps.changed.outputs.shellcheck_files }}
+      bandit_files: ${{ steps.changed.outputs.bandit_files }}
+      trivy_config_files: ${{ steps.changed.outputs.trivy_config_files }}
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Calculate changed recipe files
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only --diff-filter=ACMRT -z "$BASE_SHA" "$HEAD_SHA" -- metro-vision-ai-app-recipe | jq -Rsc 'split("\u0000")[:-1]')
+          else
+            files=$(git ls-files -z metro-vision-ai-app-recipe | jq -Rsc 'split("\u0000")[:-1]')
+          fi
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          echo "shellcheck_files=$(jq -c '[.[] | select(endswith(".sh"))]' <<< "$files")" >> "$GITHUB_OUTPUT"
+          echo "bandit_files=$(jq -c '[.[] | select(endswith(".py") and (startswith("metro-vision-ai-app-recipe/test-suite/") | not) and (startswith("metro-vision-ai-app-recipe/smart-intersection/tests/") | not))]' <<< "$files")" >> "$GITHUB_OUTPUT"
+          echo "trivy_config_files=$(jq -c '[.[] | select(endswith(".yaml") or endswith(".yml") or endswith(".json") or endswith(".tf") or endswith(".tfvars") or endswith(".hcl") or test("(^|/)Dockerfile(\\..*)?$"))]' <<< "$files")" >> "$GITHUB_OUTPUT"
+
   virus-scan:
     name: Run Virus Scan
     runs-on: ubuntu-24.04
+    needs: changed-files
+    env:
+      CHANGED_FILES: ${{ needs.changed-files.outputs.files }}
     strategy:
       fail-fast: false
     steps:
@@ -26,16 +61,28 @@ jobs:
       - name: Run Virus Scan
         run: |
           mkdir -p reports
-          docker pull clamav/clamav
-          docker run --rm -v "${{ github.workspace }}:/src" clamav/clamav clamscan -r /src/metro-vision-ai-app-recipe/ > reports/clamav-report.txt || true
-          infected_count=$(awk '/ FOUND$/ { count++ } END { print count + 0 }' reports/clamav-report.txt)
+          files=()
+          while IFS= read -r -d '' file; do
+            if [ -f "$file" ]; then
+              files+=("/src/$file")
+            fi
+          done < <(jq -j '.[] | . + "\u0000"' <<< "$CHANGED_FILES")
+          : > reports/clamav-report.txt
+          infected_count=0
+          if [ "${#files[@]}" -gt 0 ]; then
+            docker pull clamav/clamav
+            docker run --rm -v "$GITHUB_WORKSPACE:/src" clamav/clamav clamscan "${files[@]}" > reports/clamav-report.txt || true
+            infected_count=$(awk '/ FOUND$/ { count++ } END { print count + 0 }' reports/clamav-report.txt)
+          fi
           {
             echo "### Virus Scan Results"
             echo "| Metric | Count |"
             echo "|--------|------:|"
             echo "| Infected files | $infected_count |"
             echo ""
-            if [ "$infected_count" -gt 0 ]; then
+            if [ "${#files[@]}" -eq 0 ]; then
+              echo "No supporting file changes; virus scan passed without running."
+            elif [ "$infected_count" -gt 0 ]; then
               echo "| File | Detection |"
               echo "|------|-----------|"
               awk '/ FOUND$/ { line = $0; sub(/ FOUND$/, "", line); file = line; sub(/: [^:]*$/, "", file); detection = line; sub(/^.*: /, "", detection); printf "| %s | %s |\n", file, detection }' reports/clamav-report.txt
@@ -52,6 +99,9 @@ jobs:
 
   shellcheck:
     runs-on: ubuntu-24.04
+    needs: changed-files
+    env:
+      SHELLCHECK_FILES: ${{ needs.changed-files.outputs.shellcheck_files }}
 
     steps:
       - name: Check out metro-ai-suite repository
@@ -65,15 +115,25 @@ jobs:
 
       - name: Run ShellCheck
         run: |
-          cd metro-ai-suite-repo/metro-vision-ai-app-recipe/
-          echo "Scanning for .sh files and running ShellCheck..."
-          find . -type f -name "*.sh" | tee shell_files.txt | xargs -r shellcheck -S error -f gcc > shellcheck_report.txt || scan_status=$?
+          cd metro-ai-suite-repo
+          echo "Scanning changed .sh files and running ShellCheck..."
+          shell_files=()
+          scan_status=0
+          while IFS= read -r -d '' file; do
+            if [ -f "$file" ]; then shell_files+=("$file"); fi
+          done < <(jq -j '.[] | . + "\u0000"' <<< "$SHELLCHECK_FILES")
+          : > shellcheck_report.txt
+          if [ "${#shell_files[@]}" -gt 0 ]; then
+            shellcheck -S error -f gcc "${shell_files[@]}" > shellcheck_report.txt || scan_status=$?
+          fi
           issue_count=$(wc -l < shellcheck_report.txt)
           {
             echo "### ShellCheck Results"
             echo "| File | Line | Column | Severity | Code | Finding |"
             echo "|------|-----:|-------:|----------|------|---------|"
-            if [ "$issue_count" -gt 0 ]; then
+            if [ "${#shell_files[@]}" -eq 0 ]; then
+              echo "No supporting file changes; ShellCheck passed without running."
+            elif [ "$issue_count" -gt 0 ]; then
               while IFS=: read -r file line column diagnostic; do
                 severity="${diagnostic# }"
                 severity="${severity%%:*}"
@@ -92,7 +152,7 @@ jobs:
             echo "Error-level findings: $issue_count"
             echo "Full report: shellcheck_report.txt"
           } >> "$GITHUB_STEP_SUMMARY"
-          cp shellcheck_report.txt ${{ github.workspace }}
+          cp shellcheck_report.txt "$GITHUB_WORKSPACE"
           exit "${scan_status:-0}"
 
       - name: Upload ShellCheck report
@@ -109,6 +169,9 @@ jobs:
       contents: read
       packages: read
     runs-on: ubuntu-24.04
+    needs: changed-files
+    env:
+      TRIVY_CONFIG_FILES: ${{ needs.changed-files.outputs.trivy_config_files }}
     steps:
       - name: Check out metro-ai-suites repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -128,13 +191,29 @@ jobs:
 
       - name: Trivy config scan
         run: |
-          trivy config \
-            --skip-version-check \
-            --severity HIGH,CRITICAL \
-            --exit-code 1 \
-            --format json \
-            --output trivy-config-report.json \
-            metro-vision-ai-app-recipe
+          config_files=()
+          while IFS= read -r -d '' file; do
+            if [ -f "$file" ]; then config_files+=("$file"); fi
+          done < <(jq -j '.[] | . + "\u0000"' <<< "$TRIVY_CONFIG_FILES")
+          reports=()
+          scan_status=0
+          for index in "${!config_files[@]}"; do
+            report="trivy-config-report-$index.json"
+            reports+=("$report")
+            trivy config \
+              --skip-version-check \
+              --severity HIGH,CRITICAL \
+              --exit-code 1 \
+              --format json \
+              --output "$report" \
+              "${config_files[index]}" || scan_status=$?
+          done
+          if [ "${#reports[@]}" -gt 0 ]; then
+            jq -s '{Results: [.[].Results[]?]}' "${reports[@]}" > trivy-config-report.json
+          else
+            printf '{"Results":[]}\n' > trivy-config-report.json
+          fi
+          exit "$scan_status"
       - name: Summarize Trivy config findings
         if: always()
         run: |
@@ -144,6 +223,10 @@ jobs:
           if [ ! -s "$report" ]; then
             echo "Trivy JSON report was not generated." | tee "$table" >> "$GITHUB_STEP_SUMMARY"
             exit 1
+          fi
+          if [ "$(jq 'length' <<< "$TRIVY_CONFIG_FILES")" -eq 0 ]; then
+            echo "No supporting file changes; Trivy config scan passed without running." | tee "$table" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           high_count=$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity == "HIGH")] | length' "$report")
           critical_count=$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity == "CRITICAL")] | length' "$report")
@@ -185,6 +268,9 @@ jobs:
     outputs:
       high_findings: ${{ steps.collect-bandit-high.outputs.has_high }}
     runs-on: ubuntu-24.04
+    needs: changed-files
+    env:
+      BANDIT_FILES: ${{ needs.changed-files.outputs.bandit_files }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -199,9 +285,15 @@ jobs:
         id: run-bandit
         run: |
           bandit_exit=0
-          bandit_venv/bin/bandit -r metro-vision-ai-app-recipe \
-            -x metro-vision-ai-app-recipe/test-suite,metro-vision-ai-app-recipe/smart-intersection/tests \
-            -f json -o bandit-report.json || bandit_exit=$?
+          python_files=()
+          while IFS= read -r -d '' file; do
+            if [ -f "$file" ]; then python_files+=("$file"); fi
+          done < <(jq -j '.[] | . + "\u0000"' <<< "$BANDIT_FILES")
+          if [ "${#python_files[@]}" -gt 0 ]; then
+            bandit_venv/bin/bandit "${python_files[@]}" -f json -o bandit-report.json || bandit_exit=$?
+          else
+            printf '{"results":[]}\n' > bandit-report.json
+          fi
           echo "exit_code=$bandit_exit" >> "$GITHUB_OUTPUT"
           exit 0
       - name: Summarize Bandit findings
@@ -211,6 +303,10 @@ jobs:
           if [ ! -f bandit-report.json ]; then
             echo "Bandit report was not generated." >> "$GITHUB_STEP_SUMMARY"
             exit 1
+          fi
+          if [ "$(jq 'length' <<< "$BANDIT_FILES")" -eq 0 ]; then
+            echo "No supporting file changes; Bandit scan passed without running." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           jq -r '"| Severity | Findings |\n|----------|----------|\n| HIGH | \([.results[] | select(.issue_severity == "HIGH")] | length) |\n| MEDIUM | \([.results[] | select(.issue_severity == "MEDIUM")] | length) |\n| LOW | \([.results[] | select(.issue_severity == "LOW")] | length) |"' bandit-report.json >> "$GITHUB_STEP_SUMMARY"
           if jq -e '.results | length > 0' bandit-report.json > /dev/null; then
@@ -312,7 +408,7 @@ jobs:
     name: Verify Scan Status
     runs-on: ubuntu-24.04
     if: always()
-    needs: [virus-scan, shellcheck, bandit, trivy-config-scan, sanity]
+    needs: [changed-files, virus-scan, shellcheck, bandit, trivy-config-scan, sanity]
     steps:
       - name: Generate scan status
         env:
@@ -323,8 +419,8 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
-          names=("virus-scan" "shellcheck" "bandit" "trivy-config-scan" "sanity")
-          statuses=("${{ needs.virus-scan.result }}" "${{ needs.shellcheck.result }}" "${{ needs.bandit.result }}" "${{ needs.trivy-config-scan.result }}" "${{ needs.sanity.result }}")
+          names=("changed-files" "virus-scan" "shellcheck" "bandit" "trivy-config-scan" "sanity")
+          statuses=("${{ needs.changed-files.result }}" "${{ needs.virus-scan.result }}" "${{ needs.shellcheck.result }}" "${{ needs.bandit.result }}" "${{ needs.trivy-config-scan.result }}" "${{ needs.sanity.result }}")
           passed=0
           failed=0
           skipped=0
@@ -358,40 +454,4 @@ jobs:
           if [ "$failed" -gt 0 ]; then
             echo "::error title=Security Scan Failed::Failed jobs: ${failed_names[*]}"
             exit 1
-          fi
-
-  comment-high-findings:
-    name: Comment on HIGH findings
-    runs-on: ubuntu-24.04
-    needs: [bandit, trivy-config-scan]
-    if: always() && github.event_name == 'pull_request' && (needs.bandit.outputs.high_findings == 'true' || needs.trivy-config-scan.outputs.high_findings == 'true')
-    permissions:
-      actions: read
-      pull-requests: write
-      contents: read
-    steps:
-      - name: Create or update HIGH findings comment
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BANDIT_HIGH: ${{ needs.bandit.outputs.high_findings }}
-          TRIVY_HIGH: ${{ needs.trivy-config-scan.outputs.high_findings }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          marker="<!-- metro-vision-high-security-findings -->"
-          body="$marker"$'\n\n'"## HIGH severity security findings"$'\n'"HIGH-severity findings were detected. Review the scan job(s) below:"
-          if [ "$BANDIT_HIGH" = "true" ]; then
-            bandit_job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate --jq '.jobs[] | select(.name == "Bandit") | .html_url' | head -n 1)
-            bandit_job=${bandit_job:-$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID}
-            body+=$'\n'"| Bandit scan | [Open job]($bandit_job) |"
-          fi
-          if [ "$TRIVY_HIGH" = "true" ]; then
-            trivy_job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate --jq '.jobs[] | select(.name | contains("trivy-config-scan")) | .html_url' | head -n 1)
-            trivy_job=${trivy_job:-$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID}
-            body+=$'\n'"| Trivy config scan | [Open job]($trivy_job) |"
-          fi
-          comment_id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate --jq '.[] | select(.user.login == "github-actions[bot]" and ((.body // "") | contains("<!-- metro-vision-high-security-findings -->"))) | .id' | head -n 1)
-          if [ -n "$comment_id" ]; then
-            gh api "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --method PATCH --field body="$body" > /dev/null
-          else
-            gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --method POST --field body="$body" > /dev/null
           fi

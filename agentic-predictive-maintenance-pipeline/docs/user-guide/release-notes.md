@@ -1,5 +1,15 @@
 # Release Notes: Agentic Predictive Maintenance for Critical Infrastructure
 
+## Version 2026.3.0
+
+**Release Date**: TBD
+**Improvements**:
+
+- Web dashboard UI improvements and enhancements for better user experience and interaction.
+- Documentation updates: Application renamed to Agentic Predictive Maintenance for Critical
+  Infrastructure and repository links updated to the Metro AI Suite repository.
+
+
 ## Version 2026.2.0
 
 **Release Date**: September 10, 2026

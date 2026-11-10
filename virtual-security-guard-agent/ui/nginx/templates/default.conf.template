@@ -1,0 +1,229 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Virtual Security Guard Agent UI and same-origin proxy (BFF).
+#
+# Rendered at container start by the nginx entrypoint (envsubst, filtered to
+# HERMES_*/VSS_*/VSG_FLOORPLAN) into /etc/nginx/conf.d/default.conf.
+#
+#   /floorplan.json   default plan, deploy/floorplans/$VSG_FLOORPLAN.json
+#
+#   /                 SPA (static, history fallback)
+#   /hermes/...       Hermes API server, allowlisted paths only; the API key is
+#                     added here and never reaches the browser.
+#   /vss/manager/...  VSS Pipeline Manager, allowlisted read paths + image upload.
+#   /vss/datastore/.. VSS clips and search images, GET only, typed media.
+#
+# Everything else under /hermes/ and /vss/ is denied.
+
+limit_req_zone $binary_remote_addr zone=vsg_runs:1m rate=20r/m;
+limit_req_status 429;
+
+# --- CSRF guard for the proxied APIs ----------------------------------------
+# The proxy strips Origin before calling Hermes, so it must enforce same-origin
+# itself. Modern browsers send Sec-Fetch-Site; older ones still send Origin on
+# cross-origin requests.
+map $http_sec_fetch_site $vsg_cross_site {
+    default      0;
+    "cross-site" 1;
+    "same-site"  1;
+}
+
+map $http_origin $vsg_origin_host {
+    default                             "!invalid";
+    ""                                  "";
+    "~^https?://(?<origin_host>[^/]+)$" $origin_host;
+}
+
+# 0 when there is no Origin or it names this host.
+map "$vsg_origin_host|$http_host" $vsg_origin_bad {
+    default            1;
+    "~^\|"             0;
+    "~^([^|]+)\|\1$"   0;
+}
+
+map "$vsg_cross_site$vsg_origin_bad" $vsg_api_blocked {
+    default 1;
+    "00"    0;
+}
+
+# VSS serves clips as application/octet-stream with nosniff, which browsers
+# refuse to play. Type datastore objects by extension instead.
+map $uri $vsg_media_type {
+    default         application/octet-stream;
+    "~*\.mp4$"      video/mp4;
+    "~*\.jpe?g$"    image/jpeg;
+    "~*\.png$"      image/png;
+    "~*\.webp$"     image/webp;
+}
+
+server {
+    listen 8080;
+    server_name _;
+    server_tokens off;
+
+    root /usr/share/nginx/html;
+    index index.html;
+    client_max_body_size 1m;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 120s;
+
+    include /etc/nginx/vsg/security-headers.conf;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # --- Hermes -----------------------------------------------------------
+    location = /hermes/health {
+        limit_except GET { deny all; }
+        include /etc/nginx/conf.d/hermes-proxy.inc;
+    }
+
+    location = /hermes/v1/runs {
+        limit_except POST { deny all; }
+        limit_req zone=vsg_runs burst=10 nodelay;
+        include /etc/nginx/conf.d/hermes-proxy.inc;
+    }
+
+    location ~ "^/hermes/v1/runs/[A-Za-z0-9_.:-]{1,128}$" {
+        limit_except GET { deny all; }
+        include /etc/nginx/conf.d/hermes-proxy.inc;
+    }
+
+    # Run event stream (SSE): no buffering, long-lived.
+    location ~ "^/hermes/v1/runs/[A-Za-z0-9_.:-]{1,128}/events$" {
+        limit_except GET { deny all; }
+        include /etc/nginx/conf.d/hermes-proxy.inc;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        gzip off;
+    }
+
+    location ~ "^/hermes/v1/runs/[A-Za-z0-9_.:-]{1,128}/stop$" {
+        limit_except POST { deny all; }
+        include /etc/nginx/conf.d/hermes-proxy.inc;
+    }
+
+    location = /hermes/api/sessions {
+        limit_except GET POST { deny all; }
+        include /etc/nginx/conf.d/hermes-proxy.inc;
+    }
+
+    location ~ "^/hermes/api/sessions/[A-Za-z0-9_.:-]{1,128}$" {
+        limit_except GET DELETE { deny all; }
+        include /etc/nginx/conf.d/hermes-proxy.inc;
+    }
+
+    location ~ "^/hermes/api/sessions/[A-Za-z0-9_.:-]{1,128}/messages$" {
+        limit_except GET { deny all; }
+        include /etc/nginx/conf.d/hermes-proxy.inc;
+    }
+
+    location /hermes/ {
+        return 403;
+    }
+
+    # --- VSS Pipeline Manager --------------------------------------------
+    location ~ "^/vss/manager/(health|app/features|tags)$" {
+        limit_except GET { deny all; }
+        include /etc/nginx/conf.d/vss-proxy.inc;
+    }
+
+    location ~ "^/vss/manager/search/[A-Za-z0-9_-]{1,128}$" {
+        limit_except GET { deny all; }
+        include /etc/nginx/conf.d/vss-proxy.inc;
+    }
+
+    # Live watch: create a watched query, toggle watch, read refresh cadence.
+    location = /vss/manager/search {
+        limit_except POST { deny all; }
+        client_max_body_size 64k;
+        include /etc/nginx/conf.d/vss-proxy.inc;
+    }
+
+    location ~ "^/vss/manager/search/[A-Za-z0-9_-]{1,128}/watch$" {
+        limit_except PATCH { deny all; }
+        client_max_body_size 4k;
+        include /etc/nginx/conf.d/vss-proxy.inc;
+    }
+
+    # Live RTSP cameras (list/add, then edit/pause/remove one).
+    location = /vss/manager/streams {
+        limit_except GET POST { deny all; }
+        client_max_body_size 16k;
+        include /etc/nginx/conf.d/vss-proxy.inc;
+    }
+
+    location ~ "^/vss/manager/streams/[A-Za-z0-9_-]{1,128}$" {
+        limit_except GET PATCH DELETE { deny all; }
+        client_max_body_size 16k;
+        include /etc/nginx/conf.d/vss-proxy.inc;
+    }
+
+    # Best-frame JPEGs for hit thumbnails (live and recorded).
+    location = /vss/manager/frames {
+        limit_except GET { deny all; }
+        include /etc/nginx/conf.d/vss-proxy.inc;
+        # Replace VSS's no-store so thumbnails are cached; errors are not.
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "private, max-age=3600";
+        include /etc/nginx/vsg/security-headers.conf;
+    }
+
+    # Subject and anchor images (the UI re-encodes them to <= 2 MB).
+    location = /vss/manager/search/images {
+        limit_except POST { deny all; }
+        client_max_body_size 3m;
+        include /etc/nginx/conf.d/vss-proxy.inc;
+    }
+
+    # --- VSS datastore (clips, search images) ------------------------------
+    location ~ "^/vss/datastore/(video-summary|live-streams)/[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$" {
+        limit_except GET { deny all; }
+        include /etc/nginx/conf.d/vss-proxy.inc;
+        # Stream through instead of spooling large clips to the /tmp tmpfs.
+        proxy_buffering off;
+        proxy_max_temp_file_size 0;
+        proxy_hide_header Content-Type;
+        add_header Content-Type $vsg_media_type always;
+        add_header Cache-Control "private, max-age=300" always;
+        include /etc/nginx/vsg/security-headers.conf;
+    }
+
+    location /vss/ {
+        return 403;
+    }
+
+    # Default floorplan, mounted read-only from deploy/floorplans/ (the name is
+    # validated in 18-vsg-env.envsh).
+    location = /floorplan.json {
+        limit_except GET { deny all; }
+        alias /etc/vsg/floorplans/${VSG_FLOORPLAN}.json;
+        default_type application/json;
+        add_header Cache-Control "no-cache" always;
+        include /etc/nginx/vsg/security-headers.conf;
+    }
+
+    # --- SPA ----------------------------------------------------------------
+    location /assets/ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        include /etc/nginx/vsg/security-headers.conf;
+    }
+
+    location / {
+        try_files $uri /index.html;
+        add_header Cache-Control "no-cache" always;
+        include /etc/nginx/vsg/security-headers.conf;
+    }
+}

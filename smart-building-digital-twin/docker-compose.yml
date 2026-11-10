@@ -317,7 +317,7 @@ services:
 
   # DL-Streamer Cameras
   showcase-cameras:
-    image: ${DLSTREAMER_PIPELINE_SERVER_IMAGE:-docker.io/intel/dlstreamer-pipeline-server:2026.2.0-ubuntu24}
+    image: ${DLSTREAMER_PIPELINE_SERVER_IMAGE:-docker.io/intel/dlstreamer-pipeline-server:2026.3.0-ubuntu24-rc1}
     networks:
       scenescape:
     tty: true

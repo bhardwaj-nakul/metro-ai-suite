@@ -8,7 +8,7 @@ detection boxes and the loitering zone on the camera's live video.
 
 - XProtect and AI Bridge set up and checked, as in
   [Set Up XProtect and AI Bridge](./set-up-xprotect-and-ai-bridge.md).
-- An analytics host with Ubuntu 22.04 or 24.04, Docker and Docker Compose.
+- An analytics host with Ubuntu 24.04 or 26.04, Docker and Docker Compose.
 - The `metro-ai-suite` repository cloned on the analytics host:
 
   ```bash
@@ -45,7 +45,26 @@ The `mqtt-table-flattener` sidecar uses this value to decide when to publish a l
 row, and so when VAP raises an event. Use the same value for VAP in
 [Part 2](#22-configure-the-environment).
 
-### 1.3 Start the application
+### 1.3 Verify the MQTT Port Exposure and Set the MQTT Host for the DL Streamer Pipeline Server
+
+The Docker Compose stack includes an Eclipse Mosquitto MQTT broker. Confirm that port `1883`
+is published to the host in `docker-compose.yml`, and set `MQTT_HOST` so the DL Streamer Pipeline
+Server can publish to it:
+
+```yaml
+broker:
+  image: docker.io/library/eclipse-mosquitto:2.0.22
+  ports:
+    - "1883:1883"
+
+dlstreamer-pipeline-server:
+  environment:
+    - MQTT_HOST=${HOST_IP} # we set to HOST_IP as broker is running in the same host
+    - MQTT_PORT=1883
+```
+
+### 1.4 Start the application
+
 
 ```bash
 docker compose up -d
@@ -95,8 +114,7 @@ MQTT_HOST=host.docker.internal
 MQTT_PORT=1883
 ```
 
-Set at least one of `DLS_PIPELINE_CPU`, `DLS_PIPELINE_GPU` and `DLS_PIPELINE_NPU`. The pipeline names you provide much be available in Loitering detection application. Only
-the devices you set can be chosen when you start a pipeline. `host.docker.internal`
+Set at least one of `DLS_PIPELINE_CPU`, `DLS_PIPELINE_GPU` and `DLS_PIPELINE_NPU`. The pipeline names you provide much be available in Loitering detection application. If using GPU or NPU pipelines, ensure host supports it. Refer to app's gpu and npu setup documentation for that. Only the devices you set can be chosen when you start a pipeline. `host.docker.internal`
 works when Loitering Detection runs on the same host as VAP; otherwise use its address.
 
 ### 2.3 Check `config/config.yaml`
@@ -195,8 +213,8 @@ metadata topic for that camera.
 3. Under **Loitering Detection**, tick **dls_vision-metadata**.
 4. Click **Save**.
 
-<!-- SCREENSHOT TODO: ../../../_assets/milestone-mc-processing-server-tab.png
-     Management Client > camera > Processing server tab, with Loitering Detection expanded and dls_vision-metadata ticked. -->
+  
+    ![Management Client showing Loitering Detection topics available for camera to subscribe](../../../_assets/milestone-mc-metadata-sub.png "Management Client camera page")
 
 The events topic, `dls_vision-events`, does not need ticking.
 
@@ -222,7 +240,6 @@ pipeline runs, the page shows **Running** and a **Stop** button, and the zone is
 Each numbered corner of the zone has its own X and Y box, as a fraction of the frame.
 **+ Point** adds a corner, and **Reset** restores `default_zone_polygon`.
 
-
 ### 5.2 Check that the pipeline runs
 
 ```bash
@@ -242,12 +259,11 @@ see [Use a simulated camera](./set-up-xprotect-and-ai-bridge.md#use-a-simulated-
 
 1. Open Smart Client and show the camera in a live view.
 2. Within a few seconds, boxes appear around detected people, labelled with their class
-   (for example `Human`), and the loitering zone is drawn as an amber box labelled
+   (for example `person`), and the loitering zone is drawn as an amber box labelled
    **Loitering Zone**.
 3. Switch to playback: the boxes are recorded with the video.
 
-<!-- SCREENSHOT TODO: ../../../_assets/milestone-sc-live-overlay.png
-     Smart Client live view: person boxes and the amber "Loitering Zone" box. -->
+    ![Smart Client showing person loitering inside a defined loitering zone](../../../_assets/milestone-sc-objects.png "Smart Client camera view")
 
 Boxes are colored by class: people blue, vehicles red, zones amber.
 

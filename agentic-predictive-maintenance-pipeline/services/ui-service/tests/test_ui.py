@@ -39,7 +39,7 @@ def test_index_no_data(client):
     respx.get("http://mock-detection/detection/videos").mock(return_value=httpx.Response(200, json={"videos": []}))
     r = client.get("/")
     assert r.status_code == 200
-    assert "Agentic Predictive Maintenance for Critical Infrastructure" in r.text
+    assert "Agentic Predictive Maintenance" in r.text
 
 
 @respx.mock
@@ -70,6 +70,11 @@ def test_index_merges_detection_and_agent_runs(client):
     respx.get("http://mock-agent/agents/runs").mock(return_value=httpx.Response(200, json=[
         {"run_id": completed_run_id, "status": "completed", "phase": "completed"},
     ]))
+    # The dashboard's "Agent Run" card defaults to the running run (r2), so
+    # index() fetches its merged status via _fetch_run_view.
+    respx.get("http://mock-detection/detection/status/r2").mock(
+        return_value=httpx.Response(200, json={"phase": "detecting"})
+    )
     r = client.get("/")
     assert r.status_code == 200
     assert completed_run_id in r.text
@@ -84,11 +89,16 @@ def test_index_running_without_phase_does_not_render_null(client):
         {"run_id": "r1", "status": "running", "phase": None, "result": None},
     ]))
     respx.get("http://mock-agent/agents/runs").mock(return_value=httpx.Response(200, json=[]))
+    # The dashboard's "Agent Run" card defaults to the running run (r1), so
+    # index() fetches its merged status via _fetch_run_view.
+    respx.get("http://mock-detection/detection/status/r1").mock(
+        return_value=httpx.Response(200, json={"phase": None})
+    )
 
     r = client.get("/")
 
     assert r.status_code == 200
-    assert "Inspection: RUNNING" in r.text
+    assert "Running…" in r.text
     assert "RUNNING (None)" not in r.text
     assert "RUNNING (null)" not in r.text
 
@@ -96,12 +106,87 @@ def test_index_running_without_phase_does_not_render_null(client):
 @respx.mock
 def test_detections_page(client):
     detections = [
-        {"frame_id": 1, "label": "Rupture", "confidence": 0.9, "x": 10, "y": 10, "width": 50, "height": 40, "timestamp": "2026-01-01T00:00:00"}
+        {"frame_id": 1, "label": "Rupture", "confidence": 0.9, "x": 10, "y": 10, "width": 50, "height": 40,
+         "video_time_seconds": 1.25, "detection_timestamp": "2026-01-01T00:00:00"}
     ]
     respx.get("http://mock-storage/detections").mock(return_value=httpx.Response(200, json=detections))
     r = client.get("/detections")
     assert r.status_code == 200
     assert "Rupture" in r.text
+
+
+@respx.mock
+def test_index_run_form_posts_to_video_run_when_disabled(client):
+    app_module._MULTIMODAL_CONFIG_PATH = ""
+    respx.get("http://mock-storage/detections/summary").mock(return_value=httpx.Response(200, json={}))
+    respx.get("http://mock-detection/detection/runs").mock(return_value=httpx.Response(200, json=[]))
+    respx.get("http://mock-agent/agents/runs").mock(return_value=httpx.Response(200, json=[]))
+    respx.get("http://mock-detection/detection/videos").mock(return_value=httpx.Response(200, json={"videos": []}))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'action="/run"' in r.text
+    assert "run-multimodal" not in r.text
+    assert 'name="video_filename"' in r.text
+
+
+@respx.mock
+def test_index_run_form_posts_to_multimodal_run_when_enabled(client):
+    app_module._MULTIMODAL_CONFIG_PATH = "/app/configs/gas_detection.docker.json"
+    respx.get("http://mock-storage/detections/summary").mock(return_value=httpx.Response(200, json={}))
+    respx.get("http://mock-detection/detection/runs").mock(return_value=httpx.Response(200, json=[]))
+    respx.get("http://mock-agent/agents/runs").mock(return_value=httpx.Response(200, json=[]))
+    respx.get("http://mock-detection/detection/videos").mock(return_value=httpx.Response(200, json={"videos": []}))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert 'action="/run-multimodal"' in r.text
+    assert 'name="video_filename"' not in r.text
+    app_module._MULTIMODAL_CONFIG_PATH = ""
+
+
+@respx.mock
+def test_detections_page_shows_modality_columns_when_enabled(client):
+    app_module._MULTIMODAL_CONFIG_PATH = "/app/configs/gas_detection.docker.json"
+    detections = [
+        {
+            "frame_id": 1, "label": "Smoke", "confidence": 0.95, "x": 0, "y": 0, "width": 0, "height": 0,
+            "video_time_seconds": 0.0, "detection_timestamp": "2026-01-01T00:00:00",
+            "source": "gas_detection_multimodal",
+            "image_confidence": 0.9, "sensor_confidence": 0.97, "sensor_raw_json": "{}",
+        }
+    ]
+    respx.get("http://mock-storage/detections").mock(return_value=httpx.Response(200, json=detections))
+    r = client.get("/detections")
+    assert r.status_code == 200
+    assert "gas_detection_multimodal" in r.text
+    assert "0.900" in r.text
+    assert "0.970" in r.text
+    app_module._MULTIMODAL_CONFIG_PATH = ""
+
+
+@respx.mock
+def test_trigger_multimodal_run_disabled_returns_404(client):
+    app_module._MULTIMODAL_CONFIG_PATH = ""
+    r = client.post("/run-multimodal", data={"device": "CPU"}, follow_redirects=False)
+    assert r.status_code == 404
+
+
+@respx.mock
+def test_trigger_multimodal_run_posts_config_path(client):
+    app_module._MULTIMODAL_CONFIG_PATH = "/app/configs/gas_detection.docker.json"
+    route = respx.post("http://mock-detection/detection/run-multimodal").mock(
+        return_value=httpx.Response(202, json={"run_id": "abc123"})
+    )
+
+    r = client.post("/run-multimodal", data={"device": "CPU"}, follow_redirects=False)
+
+    assert r.status_code == 303
+    assert r.headers["location"] == "/results/abc123"
+    assert route.called
+    sent = respx.calls.last.request
+    import json as _json
+    body = _json.loads(sent.content)
+    assert body == {"device": "CPU", "config_path": "/app/configs/gas_detection.docker.json"}
+    app_module._MULTIMODAL_CONFIG_PATH = ""
 
 
 @respx.mock
@@ -120,3 +205,35 @@ def test_health(client):
     assert r.status_code == 200
     assert r.json()["service"] == "ui-service"
     assert r.json()["use_case_id"] == "test-case"
+
+
+@respx.mock
+def test_detections_page_paginates(client):
+    respx.get("http://mock-storage/detections/count").mock(return_value=httpx.Response(200, json={"count": 600}))
+    rows = [{"frame_id": i, "label": "Rupture", "confidence": 0.9, "x": 1, "y": 1, "width": 2, "height": 2,
+             "video_time_seconds": 1.0, "detection_timestamp": "t"} for i in range(100)]
+    route = respx.get("http://mock-storage/detections").mock(return_value=httpx.Response(200, json=rows))
+
+    r = client.get("/detections?limit=500&page=2&label=Rupture")
+    assert r.status_code == 200
+    assert route.calls.last.request.url.params["offset"] == "500"
+    assert route.calls.last.request.url.params["limit"] == "500"
+    assert "501–600 of 600 matching" in r.text
+    assert "Prev" in r.text and "Next" not in r.text
+    assert "label=Rupture&amp;limit=500&amp;page=1" in r.text
+
+
+@respx.mock
+def test_detections_page_first_page_has_next_but_no_prev(client):
+    respx.get("http://mock-storage/detections/count").mock(return_value=httpx.Response(200, json={"count": 600}))
+    row = {"frame_id": 1, "label": "Rupture", "confidence": 0.9, "x": 1, "y": 1, "width": 2, "height": 2,
+           "video_time_seconds": 1.0, "detection_timestamp": "t"}
+    respx.get("http://mock-storage/detections").mock(return_value=httpx.Response(200, json=[row]))
+    r = client.get("/detections?limit=100")
+    assert "Next" in r.text and "Prev" not in r.text
+
+
+def test_page_items_collapses_long_ranges():
+    assert app_module._page_items(1, 1) == []
+    assert app_module._page_items(1, 3) == [1, 2, 3]
+    assert app_module._page_items(10, 20) == [1, None, 8, 9, 10, 11, 12, None, 20]

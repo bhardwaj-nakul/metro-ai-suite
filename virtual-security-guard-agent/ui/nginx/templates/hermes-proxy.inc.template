@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Shared Hermes proxy settings, included by each allowlisted /hermes/ location.
+# Rendered to /etc/nginx/conf.d/hermes-proxy.inc (not matched by conf.d/*.conf).
+
+if ($vsg_api_blocked) {
+    return 403;
+}
+
+rewrite ^/hermes(/.*)$ $1 break;
+proxy_pass ${HERMES_BASE_URL};
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Authorization "Bearer ${HERMES_API_KEY}";
+# Hermes rejects browser Origins it has not allowlisted (CORS is off); the
+# request is same-origin by the time it gets here (see $vsg_api_blocked).
+proxy_set_header Origin "";
+proxy_set_header Referer "";
+proxy_set_header Cookie "";
+proxy_hide_header Set-Cookie;
+proxy_hide_header Access-Control-Allow-Origin;
+proxy_hide_header Access-Control-Allow-Credentials;
+proxy_hide_header X-Powered-By;

@@ -173,7 +173,7 @@ look for the **Camera ID**.
 To run this test in a DL Streamer Pipeline Server container:
 
 ```bash
-docker run -it --entrypoint bash  --rm --net host  intel/dlstreamer-pipeline-server:2026.2.0-ubuntu24
+docker run -it --entrypoint bash  --rm --net host  intel/dlstreamer-pipeline-server:2026.3.0-ubuntu24-rc1
 ```
 
 Then run the GStreamer command:

@@ -16,14 +16,14 @@ CONFIG_ONLY=false
 
 # =================== Functions ======================
 show_help() {
-    echo -e "Agentic Predictive Maintenance for Critical Infrastructure Blueprint v1.0"
+    echo -e "Agentic Predictive Maintenance Blueprint v1.0"
     echo -e "Copyright (C) 2026 Intel Corporation"
     echo -e ""
     echo -e "${YELLOW}USAGE:${NC}"
     echo -e "  ${GREEN}source setup.sh --use-case <use-case-name> [--stop | --clean-data | config]${NC}"
     echo -e ""
     echo -e "${YELLOW}OPTIONS:${NC}"
-    echo -e "  ${BLUE}--use-case <name>${NC}    Use case to deploy (required). Example: pipeline-defect-detection"
+    echo -e "  ${BLUE}--use-case <name>${NC}    Use case to deploy (required). Examples: pipeline-defect-detection, gas-detection"
     echo -e "  ${BLUE}--stop${NC}               Bring down all running containers"
     echo -e "  ${BLUE}--clean-data${NC}         Bring down containers and remove all volumes"
     echo -e "  ${BLUE}config${NC}               Print resolved compose configuration without starting"
@@ -31,7 +31,7 @@ show_help() {
     echo -e ""
     echo -e "${YELLOW}EXAMPLES:${NC}"
     echo -e "  ${GRAY}source setup.sh --use-case pipeline-defect-detection"
-    echo -e "  source setup.sh --use-case weld-defect-detection"
+    echo -e "  source setup.sh --use-case gas-detection"
     echo -e "  source setup.sh --use-case pipeline-defect-detection --stop${NC}"
 }
 
@@ -83,7 +83,7 @@ remove_volumes() {
 }
 
 validate_env() {
-    # The env file ships inside the use-case directory (apps/<use-case>/.env_<use-case>),
+    # The env file ships inside the use-case directory (apps/<dir>/.env_<use-case>),
     # not at the project root.
     local env_file="${USE_CASE_DIR}/.env_${USE_CASE}"
     if [ ! -f "${env_file}" ]; then
@@ -99,6 +99,7 @@ validate_env() {
     local _pre_dl_device="${DL_DEVICE:-}"
 
     # Source the env file
+    unset MULTIMODAL_CONFIG_PATH
     set -a
     source "${env_file}"
     set +a
@@ -136,6 +137,27 @@ validate_env() {
         export RENDER_GROUP_ID
         RENDER_GROUP_ID=$(stat -c "%g" "${render_devices[0]}")
     fi
+
+    # NPU accel group configuration. The detection container runs as a non-root
+    # user, so it needs the group owning /dev/accel/accel* added to reach the
+    # NPU. Keep the compose default if this host has no NPU accel node.
+    local accel_devices=(/dev/accel/accel*)
+    if [ -e "${accel_devices[0]}" ]; then
+        echo -e "\nACCEL (NPU) device exists. Getting the GID...\n"
+        export ACCEL_GROUP_ID
+        ACCEL_GROUP_ID=$(stat -c "%g" "${accel_devices[0]}")
+    fi
+
+    # LLM_MODEL_PATH is stored relative to the repo root in the use-case env
+    # file (e.g. "./apps/.../Phi-4-mini-instruct") for portability across
+    # machines/users. Docker Compose resolves relative volume host paths
+    # against the compose file's directory (docker/), not the caller's CWD —
+    # so a relative LLM_MODEL_PATH silently binds an empty/auto-created stub
+    # directory instead of the real model, and OVMS then fails to serve any
+    # model ("No version found for model in path" / "Mediapipe graph
+    # definition with requested name is not found"). Normalize it to an
+    # absolute path here (anchored at the repo root, same convention as
+    # USE_CASE_DIR below) before it reaches docker compose.
     if [ -n "${LLM_MODEL_PATH:-}" ] && [[ "${LLM_MODEL_PATH}" != /* ]]; then
         export LLM_MODEL_PATH="$(cd "${PWD}" && realpath -m "${LLM_MODEL_PATH}")"
     fi
@@ -237,21 +259,24 @@ fi
 
 # =================== Resolve use-case paths ======================
 if [ -n "${USE_CASE}" ]; then
-    # Look for the use-case in the current repo (eal) or sibling eas repo
+    # A use case is identified by its env file (apps/<dir>/.env_<use-case>);
+    # <dir> is usually the use-case name but may differ (e.g. use case
+    # "gas-detection" lives in apps/gas-detection-multimodal/).
     USE_CASE_DIR=""
-    CANDIDATE_DIRS=(
-        "${PWD}/apps/${USE_CASE}"
-    )
-    for dir in "${CANDIDATE_DIRS[@]}"; do
-        if [ -d "${dir}" ]; then
-            USE_CASE_DIR="${dir}"
-            break
-        fi
-    done
+    if [ -f "${PWD}/apps/${USE_CASE}/.env_${USE_CASE}" ]; then
+        USE_CASE_DIR="${PWD}/apps/${USE_CASE}"
+    else
+        for env_candidate in "${PWD}"/apps/*/.env_"${USE_CASE}"; do
+            if [ -f "${env_candidate}" ]; then
+                USE_CASE_DIR="$(dirname "${env_candidate}")"
+                break
+            fi
+        done
+    fi
 
     if [ -z "${USE_CASE_DIR}" ]; then
         echo -e "${RED}ERROR: Use case '${USE_CASE}' not found.${NC}" >&2
-        echo -e "${YELLOW}Expected directory: apps/${USE_CASE}/${NC}" >&2
+        echo -e "${YELLOW}Expected env file: apps/<dir>/.env_${USE_CASE}${NC}" >&2
         return 1 2>/dev/null || exit 1
     fi
     export USE_CASE_DIR
@@ -287,13 +312,13 @@ case "${ACTION}" in
         if [ ! -f "${SAMPLE_VIDEO}" ]; then
             echo -e "${YELLOW}⚠️  Sample video not found: ${SAMPLE_VIDEO}${NC}"
             echo -e "${YELLOW}   Run the data prep script to download and create it:${NC}"
-            echo -e "${YELLOW}       python scripts/download_and_prep_data.py <dataset_url> --use-case ${USE_CASE}${NC}"
+            echo -e "${YELLOW}       make prepare-data USE_CASE=${USE_CASE} DATASET_URL=<dataset_url>${NC}"
             echo -e "${YELLOW}   DL Streamer will fail to start the auto_start pipeline without this file.${NC}"
             echo -e "${YELLOW}   Set LLM_MODE=fallback in ${USE_CASE_DIR}/.env_${USE_CASE} to run without DL Streamer.${NC}"
             echo
         fi
 
-        echo -e "${BLUE}Starting Agentic Predictive Maintenance for Critical Infrastructure — use case: ${USE_CASE}${NC}"
+        echo -e "${BLUE}Starting Agentic Predictive Maintenance — use case: ${USE_CASE}${NC}"
 
         COMPOSE_CMD="docker compose \
             -f docker/compose.base.yaml \
@@ -307,8 +332,24 @@ case "${ACTION}" in
         fi
 
         if has_gpu_device; then
+            COMPOSE_CMD="${COMPOSE_CMD} -f docker/compose.detection-gpu.yaml"
+            echo -e "${BLUE}Detection service GPU device mapping enabled.${NC}"
+        fi
+
+        if has_gpu_device; then
             COMPOSE_CMD="${COMPOSE_CMD} -f docker/compose.dlstreamer-gpu.yaml"
             echo -e "${BLUE}DL Streamer GPU device mapping enabled.${NC}"
+        fi
+
+        if has_npu_device; then
+            COMPOSE_CMD="${COMPOSE_CMD} -f docker/compose.detection-npu.yaml"
+            echo -e "${BLUE}Detection service NPU device mapping enabled.${NC}"
+            # Grant the accel group only when it isn't already added by the GPU
+            # overlay's render group (same GID on Intel client platforms) —
+            # docker compose rejects duplicate group_add entries.
+            if ! has_gpu_device || [ "${ACCEL_GROUP_ID:-}" != "${RENDER_GROUP_ID:-}" ]; then
+                COMPOSE_CMD="${COMPOSE_CMD} -f docker/compose.detection-npu-group.yaml"
+            fi
         fi
 
         if has_npu_device; then

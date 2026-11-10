@@ -122,7 +122,6 @@ the zone stays visible on empty scenes. Without zones, frames with no detections
 skipped. For every loitering row, it posts an
 analytics event to `<app_id>-events`; see [Events and Alarms](./events-and-alarms.md).
 
-
 ## Limitations
 
 - **The VAP page in Management Client is not camera-aware yet.** The camera page works

@@ -472,5 +472,5 @@ curl http://localhost:8080/api/agents/results/$RUN_ID | python3 -m json.tool
 For data preparation (creating a source video under `resources/videos/`):
 
 ```bash
-python scripts/download_and_prep_data.py <dataset_url> --use-case pipeline-defect-detection
+make prepare-data USE_CASE=pipeline-defect-detection DATASET_URL="<dataset_url>"
 ```

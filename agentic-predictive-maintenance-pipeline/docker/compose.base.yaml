@@ -48,6 +48,8 @@ services:
     image: eclipse-mosquitto:2.0.18
     container_name: apm-mqtt-broker
     hostname: mqtt-broker
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
     volumes:
       - ../config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     networks:
@@ -77,6 +79,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - apm_sqlite_data:/data
+    ports:
+      - "${STORAGE_PORT:-5001}:5001"
     networks:
       - apm_network
     restart: unless-stopped
@@ -90,7 +94,7 @@ services:
       start_period: 10s
 
   dlstreamer-pipeline-server:
-    image: ${DLSTREAMER_PIPELINE_SERVER_IMAGE:-intel/dlstreamer-pipeline-server:2026.2.0-ubuntu24-rc1}
+    image: ${DLSTREAMER_PIPELINE_SERVER_IMAGE:-intel/dlstreamer-pipeline-server:2026.3.0-ubuntu24-rc1}
     container_name: apm-dlstreamer
     hostname: dlstreamer-pipeline-server
     environment:
@@ -103,9 +107,9 @@ services:
       REST_SERVER_PORT: ${PIPELINE_SERVER_PORT:-8554}
       MQTT_HOST: mqtt-broker
       MQTT_PORT: 1883
-      MQTT_USERNAME: ${MQTT_USERNAME:-apm-client}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:-change-me-mqtt-password}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${PIPELINE_SERVER_PORT:-8554}:${PIPELINE_SERVER_PORT:-8554}"
     volumes:
       - ${USE_CASE_CONFIGS_DIR:-/tmp/apm-placeholder}/pipeline-server-config.json:/home/pipeline-server/config.json:ro
       - ${USE_CASE_MODELS_DIR:-/tmp/models}:/home/pipeline-server/models:ro
@@ -114,10 +118,6 @@ services:
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=1g
       - /var/cache/pipeline_root:uid=1999,gid=1999,mode=0755
-    group_add:
-      - "109"
-      - "110"
-      - "992"
     depends_on:
       mqtt-broker:
         condition: service_healthy
@@ -128,16 +128,17 @@ services:
       - no-new-privileges
 
   model-download:
-    image: ${REGISTRY:-intel/}model-download:${MODEL_DOWNLOAD_TAG:-2026.1.0}
+    image: ${REGISTRY:-intel/}model-download:${MODEL_DOWNLOAD_TAG:-2026.3.0-rc1}
     container_name: apm-model-download
     hostname: model-download
     # The model-download entrypoint only accepts the plugin list via the
     # --plugins CLI flag — it does not read an ENABLED_PLUGINS env var.
-    command: ["--plugins", "${MODEL_DOWNLOAD_PLUGINS:-huggingface,openvino}"]
+    command: ["--plugins", "${MODEL_DOWNLOAD_PLUGINS:-huggingface,openvino,ultralytics}"]
     environment:
       http_proxy: ${http_proxy:-}
       https_proxy: ${https_proxy:-}
       no_proxy: ${no_proxy:-}
+      OVMS_RELEASE_TAG: ${OVMS_RELEASE_TAG:-v2026.2.1}
       HF_TOKEN: ${HUGGINGFACEHUB_API_TOKEN:-}
       HF_HUB_ENABLE_HF_TRANSFER: 1
       MODEL_PATH: /opt/models

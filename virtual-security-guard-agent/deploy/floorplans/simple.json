@@ -1,0 +1,44 @@
+{
+  "name": "Simple (4 cameras)",
+  "canvas": { "width": 800, "height": 500 },
+  "zones": [
+    { "name": "Entrance", "rect": { "x": 20, "y": 20, "w": 370, "h": 220 } },
+    { "name": "Lobby", "rect": { "x": 410, "y": 20, "w": 370, "h": 220 } },
+    { "name": "Corridor", "rect": { "x": 20, "y": 260, "w": 370, "h": 220 } },
+    {
+      "name": "Parking",
+      "rect": { "x": 410, "y": 260, "w": 370, "h": 220 },
+      "outdoor": true
+    }
+  ],
+  "cameras": {
+    "camera_1": {
+      "x": 40,
+      "y": 40,
+      "zone": "Entrance",
+      "fov_angle": 90,
+      "heading": 45
+    },
+    "camera_2": {
+      "x": 760,
+      "y": 40,
+      "zone": "Lobby",
+      "fov_angle": 90,
+      "heading": 135
+    },
+    "camera_3": {
+      "x": 40,
+      "y": 460,
+      "zone": "Corridor",
+      "fov_angle": 90,
+      "heading": 315
+    },
+    "camera_4": {
+      "x": 760,
+      "y": 460,
+      "zone": "Parking",
+      "fov_angle": 90,
+      "heading": 225
+    }
+  }
+}

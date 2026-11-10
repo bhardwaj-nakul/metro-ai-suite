@@ -7,6 +7,9 @@ __pycache__/
 services/agent_service/
 services/ui_service/
 
+apps/pipeline-defect-detection/models/*
+apps/gas-detection-multimodal/models/*
+
 # Large sample media (downloaded/generated locally, not committed)
 apps/*/resources/videos/*.mp4
 datasets/

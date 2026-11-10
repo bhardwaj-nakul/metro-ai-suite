@@ -1,9 +1,8 @@
 # Milestone XProtect Integration
 
-This guide set shows how **Loitering Detection** application can be run on cameras on **Milestone XProtect** VMS. 
-Using Milestone's **AI Bridge** as the API interface, **VMS Adapter Plugin** plays a key role to interface the VMS 
-and the Loitering detection app taking away the burden of any required initial VMS specifics launch setup or any 
-metadata translations during runtime. 
+This guide explains how to run the **Loitering Detection** application on cameras managed by the **Milestone XProtect** VMS.
+Milestone's **AI Bridge** provides the API, while the **VMS Adapter Plugin** connects XProtect to the application, handling
+app registration and translating metadata at runtime.
 
 When you finish this guide, you will have:
 
@@ -48,7 +47,8 @@ Loitering Detection is an IVA application from the
 It runs a DL Streamer Pipeline Server (DLSPS) pipeline that detects and tracks people,
 and measures how long each person stays in a zone. The pipeline
 publishes its results on an MQTT broker. Along with detections, it also publishes
-one *loitering status* row for each person who stays longer than a threshold.
+one *loitering status* row for each person who stays within the defined zone longer than 
+a threshold.
 
 ### Where VAP fits
 
@@ -57,17 +57,19 @@ Neither AI Bridge nor Loitering Detection knows about the other. VAP connects th
 1. Registers Loitering Detection with AI Bridge as an IVA app.
 2. Discovers the XProtect cameras through AI Bridge.
 3. Starts a Loitering Detection pipeline on a camera's RTSP restream, with the zone and
-   threshold you set. The pipeline reads the RTSP stream from AI Bridge directly.
+  threshold you set. VAP passes the RTSP stream through to the pipeline, isolating
+  Loitering Detection from AI Bridge.
 4. Reads the pipeline's results from MQTT, and posts them to AI Bridge: detection boxes
    and the zone to the metadata topic, loitering occurrences to the event topic.
 
-
 ## Architecture
-TODO: keep VAP as separate component in the flow. Mention about XProtect
+
+VAP connects Milestone XProtect through AI Bridge to Loitering Detection, passing
+through the RTSP stream and forwarding analytics results back to AI Bridge.
 
 ```mermaid
 flowchart LR
-  subgraph WIN["Windows host"]
+  subgraph WIN["Windows host: Milestone XProtect"]
     MS["Management Server"]
     RS["Recording Server"]
     ES["Event Server"]
@@ -78,8 +80,10 @@ flowchart LR
   subgraph AIBH["Linux host: AI Bridge"]
     AIB["AI Bridge<br/>GraphQL :4000<br/>RTSP :8554<br/>topic sinks :8382"]
   end
-  subgraph VAPH["Linux host: VAP and Loitering Detection"]
+  subgraph VAPH["Linux host: VMS Adapter Plugin"]
     VAP["VMS Adapter Plugin<br/>backend :8080, UI :3443"]
+  end
+  subgraph LDH["Linux host: Loitering Detection"]
     DLS["DL Streamer<br/>Pipeline Server"]
     MQ["MQTT broker :1883"]
     FL["mqtt-table-flattener"]
@@ -90,7 +94,8 @@ flowchart LR
   AIB -- "events" --> ES
   VAP -- "register, discover cameras" --> AIB
   VAP -- "start / stop pipeline" --> DLS
-  AIB -- "RTSP" --> DLS
+  AIB -- "RTSP" --> VAP
+  VAP -- "RTSP passthrough" --> DLS
   DLS -- "detections" --> MQ
   MQ --> FL
   FL -- "loitering rows" --> MQ
@@ -111,18 +116,20 @@ sequenceDiagram
   participant SC as Smart Client
   VAP->>AIB: register "Loitering Detection" (metadata + event topics)
   AIB->>MC: app appears in Management Client
-  Admin->>MC: tick the metadata topic on the camera, define an alarm
   VAP->>AIB: discover cameras
+  Admin->>MC: tick the metadata topic on the camera, define an alarm
   Admin->>VAP: start Loitering Detection on a camera
-  VAP->>DLS: start pipeline (RTSP restream, zone, MQTT topic)
+  VAP->>DLS: start pipeline (VAP RTSP passthrough, zone, MQTT topic)
   loop every frame
     DLS->>VAP: detections (MQTT)
     VAP->>AIB: ONVIF metadata frame (boxes + zone)
     AIB->>SC: overlay on live video
   end
-  DLS->>VAP: loitering row (MQTT)
-  VAP->>AIB: analytics event
-  AIB->>SC: alarm in Alarm Manager
+  loop every event
+    DLS->>VAP: loitering row (MQTT)
+    VAP->>AIB: analytics event
+    AIB->>SC: alarm in Alarm Manager
+  end
 ```
 
 ## What you get in XProtect
@@ -140,10 +147,10 @@ supported.
 | Component | Version |
 | --- | --- |
 | Milestone XProtect | Professional+ 2026 R1 |
-| Milestone AI Bridge | 3.0.1 |
-| VMS Adapter Plugin | 1.0.0 |
-| Loitering Detection | `metro-ai-suite` `main` branch |
-| Cameras | AXIS P3265-LVE (1920×1080, H.264), and a simulated RTSP camera (detections only) |
+| Milestone AI Bridge | 3.0.1, 4.0.0 |
+| VMS Adapter Plugin | 2026.3 |
+| Loitering Detection | 2026.3 |
+| Cameras | AXIS P3265-LVE (1920×1080, H.264) |
 
 ## How to use this guide
 

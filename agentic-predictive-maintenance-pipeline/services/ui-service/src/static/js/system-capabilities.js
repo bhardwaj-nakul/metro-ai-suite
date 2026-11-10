@@ -71,6 +71,11 @@
     return joinDetails(typeLabels.concat([memory]), "Graphics accelerator");
   }
 
+  // "iGPU" only when every GPU is integrated; any discrete GPU yields "GPU".
+  function gpuLabel(devices) {
+    return devices.every((d) => d.category === "igpu") ? "iGPU" : "GPU";
+  }
+
   function npuDetails(device) {
     return formatGiBFromBytes(device && device.details && device.details.memory && device.details.memory.total_bytes)
       || "AI accelerator";
@@ -96,7 +101,7 @@
     if (gpus.length) {
       const names = gpus.map((d) => deviceName(d, "GPU"));
       cards.push({
-        label: "GPU",
+        label: gpuLabel(gpus),
         name: gpus.length > 1 ? names[0] + " + " + (gpus.length - 1) + " more" : names[0],
         details: gpuDetails(gpus),
         tooltip: names.join(", "),
@@ -141,7 +146,25 @@
     return card;
   }
 
+  // Device selectors keep value="GPU" (what the backend expects); only the
+  // visible text reflects the GPU type.
+  function applyGpuLabel(capabilities) {
+    const devices = Array.isArray(capabilities && capabilities.devices)
+      ? capabilities.devices.filter((d) => d && d.present === true)
+      : [];
+    const gpus = devices.filter((d) => d.category === "igpu" || d.category === "dgpu");
+    if (!gpus.length) return;
+    const label = gpuLabel(gpus);
+    document.querySelectorAll('select[name="device"] option[value="GPU"]').forEach((o) => {
+      o.textContent = label;
+    });
+    const metric = document.getElementById("metric-gpu");
+    const metricLabel = metric && metric.parentElement && metric.parentElement.querySelector(".live-stat-label");
+    if (metricLabel) metricLabel.textContent = label;
+  }
+
   function render(container, capabilities) {
+    applyGpuLabel(capabilities);
     if (!container) return;
     const cards = buildCardModels(capabilities).map(createCard);
     container.replaceChildren(...cards);
@@ -161,7 +184,6 @@
 
   async function init() {
     const container = document.getElementById("systemCapabilityCards");
-    if (!container) return;
     const capabilities = await fetchCapabilities();
     render(container, capabilities);
   }

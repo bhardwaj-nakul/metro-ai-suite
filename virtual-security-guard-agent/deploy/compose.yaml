@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Virtual Security Guard Agent UI. Run from the app root with `make up`, or:
+#   docker compose -f deploy/compose.yaml up -d
+# Settings come from deploy/.env (see deploy/.env.example).
+
+name: vsg
+
+services:
+  vsg-ui:
+    image: ${REGISTRY:-}intel/vsg-ui:${TAG:-latest}
+    build:
+      context: ../ui
+      args:
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+    restart: unless-stopped
+    ports:
+      - "${VSG_UI_HOST:-0.0.0.0}:${VSG_UI_PORT:-12346}:8080"
+    environment:
+      HERMES_BASE_URL: ${HERMES_BASE_URL:?Set HERMES_BASE_URL in deploy/.env}
+      HERMES_API_KEY: ${HERMES_API_KEY:?Set HERMES_API_KEY in deploy/.env}
+      VSS_BASE_URL: ${VSS_BASE_URL:?Set VSS_BASE_URL in deploy/.env}
+      VSG_FLOORPLAN: ${VSG_FLOORPLAN:-simple}
+    volumes:
+      - ./floorplans:/etc/vsg/floorplans:ro
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=0700,size=64m
+      - /etc/nginx/conf.d:uid=101,gid=101,mode=0700,size=1m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+          pids: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

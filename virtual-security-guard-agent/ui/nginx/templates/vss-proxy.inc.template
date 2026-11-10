@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Shared VSS proxy settings, included by each allowlisted /vss/ location.
+# Rendered to /etc/nginx/conf.d/vss-proxy.inc (not matched by conf.d/*.conf).
+# The upstream Host stays the VSS gateway, so image URLs VSS returns point at
+# an address the VSS MCP server can reach.
+
+if ($vsg_api_blocked) {
+    return 403;
+}
+
+rewrite ^/vss(/.*)$ $1 break;
+proxy_pass ${VSS_BASE_URL};
+
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_set_header Authorization "";
+proxy_set_header Origin "";
+proxy_set_header Referer "";
+proxy_set_header Cookie "";
+proxy_hide_header Set-Cookie;
+proxy_hide_header Access-Control-Allow-Origin;
+proxy_hide_header Access-Control-Allow-Credentials;
+proxy_hide_header X-Content-Type-Options;
+proxy_hide_header X-Frame-Options;
+proxy_hide_header Content-Security-Policy;
+proxy_hide_header X-Powered-By;
+# MinIO (datastore) response headers: HSTS with includeSubDomains would pin
+# the whole VSG host to HTTPS, and the rest only describe the backend.
+proxy_hide_header Strict-Transport-Security;
+proxy_hide_header X-Amz-Id-2;
+proxy_hide_header X-Amz-Request-Id;
+proxy_hide_header X-Amz-Bucket-Region;
+proxy_hide_header X-Ratelimit-Limit;
+proxy_hide_header X-Ratelimit-Remaining;
+proxy_hide_header X-Xss-Protection;

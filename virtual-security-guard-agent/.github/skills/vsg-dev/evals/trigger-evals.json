@@ -1,0 +1,22 @@
+{
+  "skill_name": "vsg-dev",
+  "should_trigger": [
+    "Run the VSG UI against the mock adapters",
+    "The Argus chat shows nothing after the agent replies",
+    "Add a new page to the Virtual Security Guard Agent app",
+    "Redeploy vsg-ui after my change",
+    "Allow the UI to call a new VSS endpoint through nginx",
+    "Change the vsg-matches directive schema",
+    "Fix React error 185 in the VSG UI",
+    "The review grid in the Argus console doesn't refresh after I confirm a match",
+    "playwright e2e fails on the floorplan page in virtual-security-guard-agent"
+  ],
+  "should_not_trigger": [
+    "Deploy VSS in search mode",
+    "Add my RTSP camera to the VSS search index",
+    "Summarize this video with VSS",
+    "Install Hermes on a new server",
+    "Install the Argus Hermes skills with agent-harness-install and configure OVMS",
+    "Draw an architecture diagram for the VSG docs in draw.io"
+  ]
+}

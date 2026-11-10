@@ -1,0 +1,220 @@
+{
+  "name": "Level 4 (sample)",
+  "canvas": {
+    "width": 1000,
+    "height": 620
+  },
+  "zones": [
+    {
+      "name": "Lecture Theatre",
+      "rect": {
+        "x": 20,
+        "y": 20,
+        "w": 260,
+        "h": 180
+      }
+    },
+    {
+      "name": "External Lift Foyer",
+      "rect": {
+        "x": 290,
+        "y": 20,
+        "w": 300,
+        "h": 180
+      },
+      "outdoor": true
+    },
+    {
+      "name": "Building Approach",
+      "rect": {
+        "x": 600,
+        "y": 20,
+        "w": 380,
+        "h": 180
+      },
+      "outdoor": true
+    },
+    {
+      "name": "External Walkway",
+      "rect": {
+        "x": 20,
+        "y": 210,
+        "w": 450,
+        "h": 100
+      },
+      "outdoor": true
+    },
+    {
+      "name": "External Seating",
+      "rect": {
+        "x": 480,
+        "y": 210,
+        "w": 500,
+        "h": 100
+      },
+      "outdoor": true
+    },
+    {
+      "name": "Offices",
+      "rect": {
+        "x": 20,
+        "y": 320,
+        "w": 200,
+        "h": 280
+      }
+    },
+    {
+      "name": "Internal Stairs",
+      "rect": {
+        "x": 230,
+        "y": 320,
+        "w": 170,
+        "h": 110
+      }
+    },
+    {
+      "name": "Internal Lift Foyer",
+      "rect": {
+        "x": 230,
+        "y": 440,
+        "w": 170,
+        "h": 160
+      }
+    },
+    {
+      "name": "Main Entry",
+      "rect": {
+        "x": 410,
+        "y": 320,
+        "w": 170,
+        "h": 120
+      }
+    },
+    {
+      "name": "Cube Stairs",
+      "rect": {
+        "x": 590,
+        "y": 320,
+        "w": 220,
+        "h": 120
+      }
+    },
+    {
+      "name": "Lift 6",
+      "rect": {
+        "x": 820,
+        "y": 320,
+        "w": 160,
+        "h": 120
+      }
+    },
+    {
+      "name": "The Cube",
+      "rect": {
+        "x": 410,
+        "y": 450,
+        "w": 570,
+        "h": 150
+      }
+    }
+  ],
+  "walls": [
+    [
+      [20, 320],
+      [460, 320]
+    ],
+    [
+      [530, 320],
+      [980, 320],
+      [980, 600],
+      [20, 600],
+      [20, 320]
+    ]
+  ],
+  "cameras": {
+    "P_Lev_4_Entry_Way_ip_107": {
+      "x": 980,
+      "y": 20,
+      "zone": "Building Approach",
+      "fov_angle": 90,
+      "heading": 135
+    },
+    "P_Lev_4_external_419_ip_52": {
+      "x": 280,
+      "y": 210,
+      "zone": "External Walkway",
+      "fov_angle": 70,
+      "heading": 90
+    },
+    "P_Lev_4_External_Lift_foyer_ip_70": {
+      "x": 290,
+      "y": 150,
+      "zone": "External Lift Foyer",
+      "fov_angle": 70,
+      "heading": 0
+    },
+    "P_Lev_4_Lift_6_ip_51": {
+      "x": 900,
+      "y": 210,
+      "zone": "Lift 6",
+      "fov_angle": 60,
+      "heading": 90
+    },
+    "P_Lev_4_External_Seating_area_ip_71": {
+      "x": 820,
+      "y": 310,
+      "zone": "External Seating",
+      "fov_angle": 90,
+      "heading": -135
+    },
+    "P_Lev_4_The_Cube_ip_72": {
+      "x": 560,
+      "y": 450,
+      "zone": "The Cube",
+      "fov_angle": 80,
+      "heading": 135
+    },
+    "P_Lev_4_The_Cube_ip_74": {
+      "x": 700,
+      "y": 600,
+      "zone": "The Cube",
+      "fov_angle": 80,
+      "heading": -90
+    },
+    "P_Lev_4_The_Cube_ip_92": {
+      "x": 980,
+      "y": 450,
+      "zone": "The Cube",
+      "fov_angle": 80,
+      "heading": 150
+    },
+    "P_Lev_4_stairs_ip_95": {
+      "x": 590,
+      "y": 440,
+      "zone": "Cube Stairs",
+      "fov_angle": 70,
+      "heading": -45
+    },
+    "P_Lev_4_lift_foyer_ip_55": {
+      "x": 400,
+      "y": 600,
+      "zone": "Internal Lift Foyer",
+      "fov_angle": 70,
+      "heading": -140
+    },
+    "P_Lev_4_Main_Entry_ip_54": {
+      "x": 410,
+      "y": 440,
+      "zone": "Main Entry",
+      "fov_angle": 70,
+      "heading": -45
+    },
+    "P_Lev_4_internal_stairs_ip_93": {
+      "x": 400,
+      "y": 320,
+      "zone": "Internal Stairs",
+      "fov_angle": 70,
+      "heading": 140
+    }
+  }
+}

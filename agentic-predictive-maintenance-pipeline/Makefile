@@ -11,6 +11,7 @@
 #   make test              - Run all unit tests
 #   make lint              - Run linters for all components
 #   make trivy-scan        - Run Trivy security scans
+#   make prepare-data      - Download dataset and build the sample video
 #
 # ==============================================================================
 
@@ -126,6 +127,40 @@ trivy-scan-$(1):  ## Trivy scan $(1)
 endef
 
 $(foreach component,$(COMPONENTS),$(eval $(call TRIVY_SCAN_COMPONENT,$(component))))
+
+# ==============================================================================
+# Sample Data Preparation
+# ==============================================================================
+
+# Dependencies go into a local venv so the host Python is never modified
+# (avoids the PEP 668 "externally-managed-environment" error on Ubuntu 24.04+).
+USE_CASE ?= pipeline-defect-detection
+VENV_DIR ?= .venv
+VENV_PYTHON := $(VENV_DIR)/bin/python
+DATA_REQUIREMENTS := scripts/requirements.txt
+
+ifneq ($(filter prepare-data,$(MAKECMDGOALS)),)
+ifeq ($(strip $(DATASET_URL)),)
+$(error DATASET_URL is required, e.g. make prepare-data USE_CASE=$(USE_CASE) DATASET_URL=<url>)
+endif
+endif
+
+$(VENV_DIR)/.requirements-installed: $(DATA_REQUIREMENTS)
+	@if [ ! -x "$(VENV_PYTHON)" ]; then \
+		echo "Creating Python virtual environment in $(VENV_DIR)..."; \
+		python3 -m venv "$(VENV_DIR)" || { \
+			rm -rf "$(VENV_DIR)"; \
+			echo "ERROR: could not create a Python virtual environment." >&2; \
+			echo "       On Ubuntu/Debian, run: sudo apt install python3-venv" >&2; \
+			exit 1; \
+		}; \
+	fi
+	"$(VENV_PYTHON)" -m pip install --quiet -r "$(DATA_REQUIREMENTS)"
+	@touch "$@"
+
+.PHONY: prepare-data
+prepare-data: $(VENV_DIR)/.requirements-installed  ## Download dataset and build sample video (USE_CASE=..., DATASET_URL=... required)
+	"$(VENV_PYTHON)" scripts/download_and_prep_data.py "$(DATASET_URL)" --use-case "$(USE_CASE)"
 
 # ==============================================================================
 # Help

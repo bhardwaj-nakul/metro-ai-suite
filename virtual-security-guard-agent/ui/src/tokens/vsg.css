@@ -1,0 +1,84 @@
+/*
+ * SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Virtual Security Guard Agent semantic tokens, layered on top of the ViPPET palette
+ * (colors-base.css / colors-semantic.css). Components reference these roles,
+ * never raw palette values.
+ */
+
+@theme inline {
+  --color-track: var(--vsg-track);
+  --color-track-soft: var(--vsg-track-soft);
+  --color-confirm: var(--vsg-confirm);
+  --color-confirm-soft: var(--vsg-confirm-soft);
+  --color-reject: var(--vsg-reject);
+  --color-camera: var(--vsg-camera);
+  --color-live: var(--vsg-live);
+  --color-pending: var(--vsg-pending);
+  --color-blueprint: var(--vsg-blueprint);
+  --color-blueprint-line: var(--vsg-blueprint-line);
+  --color-blueprint-ink: var(--vsg-blueprint-ink);
+  --color-blueprint-zone: var(--vsg-blueprint-zone);
+  --color-operator: var(--vsg-operator);
+}
+
+:root {
+  /* The subject's route: Intel electric coral. */
+  --vsg-track: var(--electric-coral);
+  --vsg-track-soft: color-mix(
+    in oklch,
+    var(--electric-coral) 14%,
+    var(--background)
+  );
+  /* Operator-confirmed sighting. */
+  --vsg-confirm: var(--green);
+  /* oklab: an oklch mix with white (hue 0) would drift the green to pink. */
+  --vsg-confirm-soft: color-mix(in oklab, var(--green) 12%, var(--background));
+  /* False positive. */
+  --vsg-reject: var(--carbon);
+  /* Camera nodes and fields of view. */
+  --vsg-camera: var(--energy-blue);
+  /* Live camera sending frames, on the (always dark) blueprint. */
+  --vsg-live: var(--electric-moss);
+  /* Agent working / awaiting review. */
+  --vsg-pending: var(--daisy-shade-2);
+  /* Spatial map: a classic-blue blueprint in both themes. */
+  --vsg-blueprint: var(--classic-blue-shade-2);
+  --vsg-blueprint-line: color-mix(
+    in oklch,
+    var(--energy-blue) 16%,
+    transparent
+  );
+  --vsg-blueprint-ink: color-mix(
+    in oklch,
+    var(--energy-blue-tint-2) 82%,
+    transparent
+  );
+  --vsg-blueprint-zone: color-mix(
+    in oklch,
+    var(--energy-blue) 38%,
+    transparent
+  );
+  /* Operator chat bubble. */
+  --vsg-operator: var(--spark-light-gray-100);
+}
+
+.dark {
+  --vsg-track: var(--coral-tint-1);
+  --vsg-track-soft: color-mix(
+    in oklch,
+    var(--coral-tint-1) 16%,
+    var(--background)
+  );
+  --vsg-confirm: var(--electric-moss);
+  --vsg-confirm-soft: color-mix(
+    in oklab,
+    var(--electric-moss) 14%,
+    var(--background)
+  );
+  --vsg-reject: var(--carbon-tint-1);
+  --vsg-pending: var(--daisy-tint-1);
+  --vsg-blueprint: oklch(0.2 0.06 262);
+  --vsg-operator: var(--spark-dark-gray-200);
+}

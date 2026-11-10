@@ -8,3 +8,5 @@ services:
   dlstreamer-pipeline-server:
     devices:
       - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GROUP_ID:-992}"

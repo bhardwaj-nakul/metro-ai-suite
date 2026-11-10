@@ -21,11 +21,9 @@ from .utility import storage_client
 
 log = logging.getLogger(__name__)
 
-_MQTT_HOST     = os.environ.get("MQTT_HOST", "mqtt-broker")
-_MQTT_PORT     = int(os.environ.get("MQTT_PORT", "1883"))
-_MQTT_TOPIC    = os.environ.get("MQTT_TOPIC", "apm/detections")
-_MQTT_USERNAME = os.environ.get("MQTT_USERNAME", "")
-_MQTT_PASSWORD = os.environ.get("MQTT_PASSWORD", "")
+_MQTT_HOST  = os.environ.get("MQTT_HOST", "mqtt-broker")
+_MQTT_PORT  = int(os.environ.get("MQTT_PORT", "1883"))
+_MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "apm/detections")
 
 
 def _on_connect(client, userdata, flags, rc, properties=None):
@@ -46,6 +44,7 @@ def _on_message(client, userdata, msg):
             meta = payload["metadata"]
             timestamp_ns = meta.get("timestamp", 0)
             frame_id = timestamp_ns // 33_333_333  # ~frame number at 30fps
+            video_time_seconds = float(timestamp_ns) / 1_000_000_000
             objects = meta.get("objects", [])
             detections = []
             for obj in objects:
@@ -54,6 +53,7 @@ def _on_message(client, userdata, msg):
                 confidence = float(det.get("confidence", 0.0))
                 detections.append({
                     "frame_id":   frame_id,
+                    "video_time_seconds": video_time_seconds,
                     "label":      label,
                     "confidence": confidence,
                     "x":          int(obj.get("x", 0)),
@@ -70,6 +70,7 @@ def _on_message(client, userdata, msg):
         for det in detections:
             storage_client.post_detection({
                 "frame_id":   det.get("frame_id", 0),
+                "video_time_seconds": det.get("video_time_seconds"),
                 "label":      det.get("label", "unknown"),
                 "confidence": float(det.get("confidence", 0.0)),
                 "x":          int(det.get("x", 0)),
@@ -89,8 +90,6 @@ def start_subscriber() -> mqtt.Client:
     Returns the mqtt.Client so callers can access it if needed.
     """
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-    if _MQTT_USERNAME:
-        client.username_pw_set(_MQTT_USERNAME, _MQTT_PASSWORD)
     client.on_connect = _on_connect
     client.on_message = _on_message
 

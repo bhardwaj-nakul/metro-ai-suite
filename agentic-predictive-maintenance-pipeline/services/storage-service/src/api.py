@@ -8,7 +8,8 @@ Endpoints:
   POST   /detections          Insert one detection
   POST   /detections/batch    Bulk insert detections
   POST   /detections/query    Run a validated structured detection query
-  GET    /detections          Query detections (filter by label, confidence, id window)
+  GET    /detections          Query detections (filters, limit/offset paging)
+  GET    /detections/count    Count detections matching the same filters
   GET    /detections/summary  Per-class statistics (optionally scoped to an id window)
   GET    /detections/max_id   Current max detection id + total count (watermark)
   DELETE /detections          Clear all detections
@@ -20,6 +21,7 @@ import os
 import logging
 import time
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -56,7 +58,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="APM Storage Service",
-    description="SQLite REST API for agentic predictive maintenance for critical infrastructure detections",
+    description="SQLite REST API for agentic predictive maintenance detections",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -80,6 +82,16 @@ class Detection(BaseModel):
     y: float = Field(..., description="Bounding box center Y")
     width: float = Field(..., description="Bounding box width")
     height: float = Field(..., description="Bounding box height")
+    video_time_seconds: Optional[float] = Field(
+        None, ge=0.0, description="Source video timestamp in seconds"
+    )
+    # Additive multimodal fields — optional/NULL for plain video defect
+    # detections. Populated for fused image+sensor classification results
+    # (e.g. the gas-detection use case), which have no bounding box.
+    source: Optional[str] = Field(None, description="Result origin, e.g. 'gas_detection_multimodal'")
+    image_confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="Image-branch confidence at the fused label")
+    sensor_confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="Sensor-branch confidence at the fused label")
+    sensor_raw_json: Optional[str] = Field(None, description="Raw sensor reading(s) for this sample, JSON-encoded")
 
 
 class DetectionBatch(BaseModel):
@@ -110,6 +122,11 @@ def insert_detection(detection: Detection, _auth: None = Depends(require_api_key
     row_id = db.insert_detection(
         detection.frame_id, detection.label, detection.confidence,
         detection.x, detection.y, detection.width, detection.height,
+        source=detection.source,
+        image_confidence=detection.image_confidence,
+        sensor_confidence=detection.sensor_confidence,
+        sensor_raw_json=detection.sensor_raw_json,
+        video_time_seconds=detection.video_time_seconds,
     )
     return {"inserted": 1}
 
@@ -131,19 +148,37 @@ def query_detections(query: DetectionQuery):
     return db.query_detections(query)
 
 
-@app.get("/detections")
-def get_detections(
+def _detection_filters(
     label: str | None = Query(None, description="Filter by defect class"),
     min_confidence: float | None = Query(None, ge=0.0, le=1.0),
+    max_confidence: float | None = Query(None, ge=0.0, le=1.0),
+    min_video_time: float | None = Query(None, ge=0.0, description="Only detections at/after this video_time_seconds"),
+    max_video_time: float | None = Query(None, ge=0.0, description="Only detections at/before this video_time_seconds"),
     min_id: int | None = Query(None, ge=0, description="Only detections with id > min_id"),
     max_id: int | None = Query(None, ge=0, description="Only detections with id <= max_id"),
+) -> dict:
+    return {
+        "label": label, "min_confidence": min_confidence, "max_confidence": max_confidence,
+        "min_video_time": min_video_time, "max_video_time": max_video_time,
+        "min_id": min_id, "max_id": max_id,
+    }
+
+
+@app.get("/detections")
+def get_detections(
+    filters: dict = Depends(_detection_filters),
     limit: int | None = Query(None, ge=1),
+    offset: int | None = Query(None, ge=0, description="Rows to skip (requires limit)"),
 ):
     global db, _request_count
     _request_count += 1
-    return db.get_detections(
-        label=label, min_confidence=min_confidence, min_id=min_id, max_id=max_id, limit=limit,
-    )
+    return db.get_detections(**filters, limit=limit, offset=offset)
+
+
+@app.get("/detections/count")
+def count_detections(filters: dict = Depends(_detection_filters)):
+    """Number of detections matching the same filters as GET /detections."""
+    return {"count": db.count_detections(**filters)}
 
 
 @app.get("/detections/summary")

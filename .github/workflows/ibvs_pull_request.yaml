@@ -16,8 +16,68 @@ on:
 permissions: {}
 
 jobs:
+  changed-files:
+    name: Get Changed Files
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      files: ${{ steps.changed.outputs.files }}
+      shellcheck_files: ${{ steps.changed.outputs.shellcheck_files }}
+      bandit_files: ${{ steps.changed.outputs.bandit_files }}
+      trivy_config_files: ${{ steps.changed.outputs.trivy_config_files }}
+      scan_app: ${{ steps.changed.outputs.scan_app }}
+      scan_feature_matching: ${{ steps.changed.outputs.scan_feature_matching }}
+      scan_streaming_pipeline: ${{ steps.changed.outputs.scan_streaming_pipeline }}
+    steps:
+    - name: Check out repository history
+      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      with:
+        persist-credentials: false
+        fetch-depth: 0
+    - name: Calculate changed IBVS files
+      id: changed
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        HEAD_SHA: ${{ github.sha }}
+      run: |
+        if [ -n "$BASE_SHA" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+          files=$(git diff --name-only --diff-filter=ACMRT -z "$BASE_SHA" "$HEAD_SHA" -- image-based-video-search | jq -Rsc 'split("\u0000")[:-1] | map(sub("^image-based-video-search/"; ""))')
+        else
+          files=$(git ls-files -z image-based-video-search | jq -Rsc 'split("\u0000")[:-1] | map(sub("^image-based-video-search/"; ""))')
+        fi
+        echo "files=$files" >> "$GITHUB_OUTPUT"
+        echo "shellcheck_files=$(jq -c '[.[] | select(endswith(".sh"))]' <<< "$files")" >> "$GITHUB_OUTPUT"
+        echo "bandit_files=$(jq -c '[.[] | select(endswith(".py"))]' <<< "$files")" >> "$GITHUB_OUTPUT"
+        echo "trivy_config_files=$(jq -c '[.[] | select(endswith(".yaml") or endswith(".yml") or endswith(".json") or endswith(".tf") or endswith(".tfvars") or endswith(".hcl") or test("(^|/)Dockerfile(\\..*)?$"))]' <<< "$files")" >> "$GITHUB_OUTPUT"
+        scan_app=false
+        scan_feature_matching=false
+        scan_streaming_pipeline=false
+        while IFS= read -r file; do
+          case "$file" in
+            compose.yml)
+              scan_app=true
+              scan_feature_matching=true
+              scan_streaming_pipeline=true
+              ;;
+            src/app/*) scan_app=true ;;
+            src/feature-matching/*) scan_feature_matching=true ;;
+            src/streaming-pipeline/*) scan_streaming_pipeline=true ;;
+          esac
+        done < <(jq -r '.[]' <<< "$files")
+        echo "scan_app=$scan_app" >> "$GITHUB_OUTPUT"
+        echo "scan_feature_matching=$scan_feature_matching" >> "$GITHUB_OUTPUT"
+        echo "scan_streaming_pipeline=$scan_streaming_pipeline" >> "$GITHUB_OUTPUT"
+
   Build-DBS-Trivy:
     name: Build IBVS App and run scans DBS, trivy image fs config
+    needs: changed-files
+    env:
+      CHANGED_FILES: ${{ needs.changed-files.outputs.files }}
+      TRIVY_CONFIG_FILES: ${{ needs.changed-files.outputs.trivy_config_files }}
+      SCAN_APP: ${{ needs.changed-files.outputs.scan_app }}
+      SCAN_FEATURE_MATCHING: ${{ needs.changed-files.outputs.scan_feature_matching }}
+      SCAN_STREAMING_PIPELINE: ${{ needs.changed-files.outputs.scan_streaming_pipeline }}
     outputs:
       high_findings: ${{ steps.collect-trivy-high.outputs.has_high }}
     runs-on: ubuntu-latest
@@ -32,10 +92,17 @@ jobs:
     - name: Build
       run: |
         cd metro-ai-suites-repo/image-based-video-search
-        docker compose build --pull --no-cache
-        docker compose up -d
-        docker ps 
+        services=()
+        if [ "$SCAN_APP" = "true" ]; then services+=(app); fi
+        if [ "$SCAN_FEATURE_MATCHING" = "true" ]; then services+=(feature-matching); fi
+        if [ "$SCAN_STREAMING_PIPELINE" = "true" ]; then services+=(streaming-pipeline); fi
+        if [ "${#services[@]}" -gt 0 ]; then
+          docker compose build --pull --no-cache "${services[@]}"
+          docker compose up -d "${services[@]}"
+          docker ps
+        fi
     - name: Checkout docker/docker-bench-security (master)
+      if: github.event_name != 'pull_request'
       uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       with:
         repository: docker/docker-bench-security
@@ -44,10 +111,12 @@ jobs:
         persist-credentials: false
     
     - name: Build Docker Bench Security
+      if: github.event_name != 'pull_request'
       run: |
         cd docker-bench-security
         docker build --no-cache -t docker-bench-security .
     - name: DBS download and scan for Wind Turbine Sample App
+      if: github.event_name != 'pull_request'
       run: |
         cd docker-bench-security
         docker run --rm --net host --pid host --userns host --cap-add audit_control \
@@ -61,6 +130,7 @@ jobs:
         --label docker_bench_security \
         docker-bench-security > dbs_scan_ibvs_app.txt
     - name: Upload DBS Scan artifact to Github
+      if: github.event_name != 'pull_request'
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f #v6.0.0
       with:
         name: DBS_Scan_Results
@@ -117,33 +187,62 @@ jobs:
         EOF
         
     - name: Trivy Image Scans
+      id: trivy-image-scan
+      continue-on-error: true
       run: |
         cd metro-ai-suites-repo/image-based-video-search
         mkdir -p ${{ github.workspace }}/reports/Trivy
-        VERSION=$(grep "feature-matching:" compose.yml | awk -F: '{print $3}'| tr -d '[:space:]')
-        trivy image intel/feature-matching:$VERSION  -s HIGH,CRITICAL --ignore-unfixed --format template --template "@trivy-html.tpl" -o trivy-image-scan-feature-matching-ignore-unfixed.html
-        trivy image intel/feature-matching:$VERSION  -s HIGH,CRITICAL --ignore-unfixed --format template --template "@csv.tpl" -o trivy-image-scan-feature-matching-ignore-unfixed.csv
-        trivy image intel/feature-matching:$VERSION -s HIGH,CRITICAL --ignore-unfixed --format json -o trivy-image-scan-feature-matching.json
-        trivy image --quiet --format spdx-json --output trivy-image-scan-feature-matching.spdx.json intel/feature-matching:$VERSION 
-        VERSION=$(grep "streaming-pipeline:" compose.yml | awk -F: '{print $3}'| tr -d '[:space:]')
-        trivy image intel/streaming-pipeline:$VERSION  -s HIGH,CRITICAL --ignore-unfixed --format template --template "@trivy-html.tpl" -o trivy-image-scan-streaming-pipeline-ignore-unfixed.html
-        trivy image intel/streaming-pipeline:$VERSION  -s HIGH,CRITICAL --ignore-unfixed --format template --template "@csv.tpl" -o trivy-image-scan-streaming-pipeline-ignore-unfixed.csv
-        trivy image intel/streaming-pipeline:$VERSION -s HIGH,CRITICAL --ignore-unfixed --format json -o trivy-image-scan-streaming-pipeline.json
-        trivy image --quiet --format spdx-json --output trivy-image-scan-streaming-pipeline.spdx.json intel/streaming-pipeline:$VERSION 
-        VERSION=$(grep "image-based-video-search:" compose.yml | awk -F: '{print $3}'| tr -d '[:space:]')
-        trivy image intel/image-based-video-search:$VERSION  -s HIGH,CRITICAL --ignore-unfixed --format template --template "@trivy-html.tpl" -o trivy-image-scan-image-based-video-search-ignore-unfixed.html
-        trivy image intel/image-based-video-search:$VERSION  -s HIGH,CRITICAL --ignore-unfixed --format template --template "@csv.tpl" -o trivy-image-scan-image-based-video-search-ignore-unfixed.csv
-        trivy image intel/image-based-video-search:$VERSION -s HIGH,CRITICAL --ignore-unfixed --format json -o trivy-image-scan-image-based-video-search.json
-        trivy image --quiet --format spdx-json --output trivy-image-scan-image-based-video-search.spdx.json intel/image-based-video-search:$VERSION
+        scan_status=0
+        scanned_images=0
+        for entry in "feature-matching:$SCAN_FEATURE_MATCHING" "streaming-pipeline:$SCAN_STREAMING_PIPELINE" "image-based-video-search:$SCAN_APP"; do
+          name=${entry%:*}
+          [ "${entry##*:}" = "true" ] || continue
+          scanned_images=$((scanned_images + 1))
+          version=$(awk -F: -v name="$name" '$0 ~ name ":" && NF >= 3 { print $3; exit }' compose.yml | tr -d '[:space:]')
+          image="intel/$name:$version"
+          report="trivy-image-scan-$name"
+          trivy image "$image" -s HIGH,CRITICAL --ignore-unfixed --exit-code 1 --format template --template "@trivy-html.tpl" -o "$report-ignore-unfixed.html" || scan_status=$?
+          trivy image "$image" -s HIGH,CRITICAL --ignore-unfixed --exit-code 1 --format template --template "@csv.tpl" -o "$report-ignore-unfixed.csv" || scan_status=$?
+          trivy image "$image" -s HIGH,CRITICAL --ignore-unfixed --exit-code 1 --format json -o "$report.json" || scan_status=$?
+          trivy image --quiet --format spdx-json --output "$report.spdx.json" "$image"
+        done
 
-        mv trivy-image* ${{ github.workspace }}/reports/Trivy
+        image_reports=(trivy-image*)
+        if [ -e "${image_reports[0]}" ]; then
+          mv trivy-image* ${{ github.workspace }}/reports/Trivy
+        fi
+        if [ "$scanned_images" -eq 0 ]; then
+          echo "No supporting file changes; Trivy image scans passed without running." >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit "$scan_status"
 
     - name: Trivy Config Scan
+      id: trivy-config-scan
+      continue-on-error: true
       run: |
         cd metro-ai-suites-repo/image-based-video-search
-        trivy config . -s HIGH,CRITICAL --format json -o trivy-config.json
+        config_files=()
+        while IFS= read -r -d '' file; do
+          if [ -f "$file" ]; then config_files+=("$file"); fi
+        done < <(jq -j '.[] | . + "\u0000"' <<< "$TRIVY_CONFIG_FILES")
+        reports=()
+        scan_status=0
+        for index in "${!config_files[@]}"; do
+          report="trivy-config-$index.json"
+          reports+=("$report")
+          trivy config "${config_files[index]}" -s HIGH,CRITICAL --exit-code 1 --format json -o "$report" || scan_status=$?
+        done
+        if [ "${#reports[@]}" -gt 0 ]; then
+          jq -s '{Results: [.[].Results[]?]}' "${reports[@]}" > trivy-config.json
+        else
+          printf '{"Results":[]}\n' > trivy-config.json
+        fi
+        echo "file_count=${#config_files[@]}" >> "$GITHUB_OUTPUT"
+        exit "$scan_status"
     - name: Summarize Trivy config findings
       if: always()
+      env:
+        CONFIG_FILE_COUNT: ${{ steps.trivy-config-scan.outputs.file_count }}
       run: |
         report="metro-ai-suites-repo/image-based-video-search/trivy-config.json"
         table="reports/Trivy/trivy-config.txt"
@@ -151,6 +250,11 @@ jobs:
         echo "## Trivy Config Findings" >> "$GITHUB_STEP_SUMMARY"
         if [ ! -s "$report" ]; then
           echo "Trivy JSON report was not generated." | tee "$table" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        if [ "$CONFIG_FILE_COUNT" -eq 0 ]; then
+          echo "No supporting file changes; Trivy config scan passed without running." | tee "$table" >> "$GITHUB_STEP_SUMMARY"
+          cp "$report" reports/Trivy/trivy-config.json
           exit 0
         fi
         high_count=$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity == "HIGH")] | length' "$report")
@@ -168,13 +272,43 @@ jobs:
         echo "HIGH: $high_count | CRITICAL: $critical_count" >> "$GITHUB_STEP_SUMMARY"
         cp "$report" reports/Trivy/trivy-config.json
     - name: Trivy FS Scan
+      id: trivy-fs-scan
+      continue-on-error: true
       run: |
         cd metro-ai-suites-repo/image-based-video-search
-        trivy fs .  --format template --template "@trivy-html.tpl" -o "trivy-fs-full-report-code-scan.html" 
-        trivy fs --list-all-pkgs --format template --template "@csv.tpl" --output trivy-fs-full-report.csv .
-        trivy fs -s HIGH,CRITICAL --ignore-unfixed . | tee trivy-fs-full-report-ignore-unfixed.txt
-        trivy fs . -s HIGH,CRITICAL --ignore-unfixed --format json -o trivy-fs-high.json
-        mv trivy-fs* ${{ github.workspace }}/reports/Trivy
+        index=0
+        scan_status=0
+        while IFS= read -r -d '' file; do
+          [ -f "$file" ] || continue
+          trivy fs "$file" -s HIGH,CRITICAL --exit-code 1 --format template --template "@trivy-html.tpl" -o "trivy-fs-$index.html" || scan_status=$?
+          trivy fs "$file" --list-all-pkgs -s HIGH,CRITICAL --exit-code 1 --format template --template "@csv.tpl" --output "trivy-fs-$index.csv" || scan_status=$?
+          trivy fs "$file" -s HIGH,CRITICAL --ignore-unfixed --exit-code 1 | tee "trivy-fs-$index.txt" || scan_status=$?
+          trivy fs "$file" -s HIGH,CRITICAL --ignore-unfixed --exit-code 1 --format json -o "trivy-fs-$index.json" || scan_status=$?
+          index=$((index + 1))
+        done < <(jq -j '.[] | . + "\u0000"' <<< "$CHANGED_FILES")
+        fs_reports=(trivy-fs-*)
+        if [ -e "${fs_reports[0]}" ]; then
+          mv trivy-fs-* ${{ github.workspace }}/reports/Trivy
+        fi
+        if [ "$index" -eq 0 ]; then
+          echo "No supporting file changes; Trivy filesystem scan passed without running." >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit "$scan_status"
+    - name: Enforce Trivy findings
+      if: always()
+      env:
+        IMAGE_SCAN_RESULT: ${{ steps.trivy-image-scan.outcome }}
+        CONFIG_SCAN_RESULT: ${{ steps.trivy-config-scan.outcome }}
+        FS_SCAN_RESULT: ${{ steps.trivy-fs-scan.outcome }}
+      run: |
+        failed=0
+        for result in "$IMAGE_SCAN_RESULT" "$CONFIG_SCAN_RESULT" "$FS_SCAN_RESULT"; do
+          if [ "$result" != "success" ]; then
+            echo "::error title=Trivy Scan Failed::One or more image, config, or filesystem scans failed or did not run."
+            failed=1
+          fi
+        done
+        exit "$failed"
     - name: Collect Trivy HIGH findings
       id: collect-trivy-high
       if: always()
@@ -199,6 +333,11 @@ jobs:
         path: reports/Trivy/
   virus-bandit-scan:
     name: Run Bandit Virus Scans
+    needs: changed-files
+    env:
+      CHANGED_FILES: ${{ needs.changed-files.outputs.files }}
+      SHELLCHECK_FILES: ${{ needs.changed-files.outputs.shellcheck_files }}
+      BANDIT_FILES: ${{ needs.changed-files.outputs.bandit_files }}
     outputs:
       high_findings: ${{ steps.collect-bandit-high.outputs.has_high }}
     runs-on: ubuntu-latest
@@ -217,17 +356,28 @@ jobs:
         sudo apt-get install -y shellcheck
 
     - name: Run ShellCheck Scan
+      id: run-shellcheck
       run: |
         cd metro-ai-suites-repo/image-based-video-search/
         mkdir -p "$GITHUB_WORKSPACE/reports"
-        find . -type f -name "*.sh" -print0 | xargs -0 -r shellcheck -f gcc > "$GITHUB_WORKSPACE/reports/shellcheck-report.txt" || true
+        shellcheck_exit=0
+        shell_files=()
+        while IFS= read -r -d '' file; do
+          if [ -f "$file" ]; then shell_files+=("$file"); fi
+        done < <(jq -j '.[] | . + "\u0000"' <<< "$SHELLCHECK_FILES")
+        : > "$GITHUB_WORKSPACE/reports/shellcheck-report.txt"
+        if [ "${#shell_files[@]}" -gt 0 ]; then
+          shellcheck -S error -f gcc "${shell_files[@]}" > "$GITHUB_WORKSPACE/reports/shellcheck-report.txt" || shellcheck_exit=$?
+        fi
         report="$GITHUB_WORKSPACE/reports/shellcheck-report.txt"
         issue_count=$(wc -l < "$report")
         {
           echo "## ShellCheck Findings"
           echo "| File | Line | Column | Severity | Code | Finding |"
           echo "|------|-----:|-------:|----------|------|---------|"
-          if [ "$issue_count" -gt 0 ]; then
+          if [ "${#shell_files[@]}" -eq 0 ]; then
+            echo "No supporting file changes; ShellCheck passed without running."
+          elif [ "$issue_count" -gt 0 ]; then
             while IFS=: read -r file line column diagnostic; do
               severity="${diagnostic# }"
               severity="${severity%%:*}"
@@ -246,20 +396,33 @@ jobs:
           echo "Findings: $issue_count"
           echo "Full report: shellcheck-report.txt"
         } >> "$GITHUB_STEP_SUMMARY"
+        echo "exit_code=$shellcheck_exit" >> "$GITHUB_OUTPUT"
         
     - name: Run Virus Scan
       run: |
         mkdir -p reports
-        docker pull clamav/clamav
-        docker run --rm -v "${{ github.workspace }}:/src" clamav/clamav clamscan -r  /src/metro-ai-suites-repo/image-based-video-search/ > ./reports/clamav-report.txt || true
-        infected_count=$(awk '/ FOUND$/ { count++ } END { print count + 0 }' reports/clamav-report.txt)
+        files=()
+        while IFS= read -r -d '' file; do
+          if [ -f "metro-ai-suites-repo/image-based-video-search/$file" ]; then
+            files+=("/src/metro-ai-suites-repo/image-based-video-search/$file")
+          fi
+        done < <(jq -j '.[] | . + "\u0000"' <<< "$CHANGED_FILES")
+        : > ./reports/clamav-report.txt
+        infected_count=0
+        if [ "${#files[@]}" -gt 0 ]; then
+          docker pull clamav/clamav
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" clamav/clamav clamscan "${files[@]}" > ./reports/clamav-report.txt || true
+          infected_count=$(awk '/ FOUND$/ { count++ } END { print count + 0 }' reports/clamav-report.txt)
+        fi
         {
           echo "### Virus Scan Results"
           echo "| Metric | Count |"
           echo "|--------|------:|"
           echo "| Infected files | $infected_count |"
           echo ""
-          if [ "$infected_count" -gt 0 ]; then
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No supporting file changes; virus scan passed without running."
+          elif [ "$infected_count" -gt 0 ]; then
             echo "| File | Detection |"
             echo "|------|-----------|"
             awk '/ FOUND$/ { line = $0; sub(/ FOUND$/, "", line); file = line; sub(/: [^:]*$/, "", file); detection = line; sub(/^.*: /, "", detection); printf "| %s | %s |\n", file, detection }' reports/clamav-report.txt
@@ -270,19 +433,40 @@ jobs:
           echo "Full report: clamav-report.txt"
         } >> "$GITHUB_STEP_SUMMARY"
     - name: Run Bandit Scan
+      id: run-bandit
       run: |
         mkdir -p reports
-        docker pull ghcr.io/pycqa/bandit/bandit
-        docker run --rm -v "${{ github.workspace }}:/src" ghcr.io/pycqa/bandit/bandit -r /src/metro-ai-suites-repo/image-based-video-search/ -f txt -o /src/reports/bandit-report.txt || true >> $GITHUB_STEP_SUMMARY
-        docker run --rm -v "${{ github.workspace }}:/src" ghcr.io/pycqa/bandit/bandit -r /src/metro-ai-suites-repo/image-based-video-search/ -f json -o /src/reports/bandit-report.json || true
+        bandit_exit=0
+        python_files=()
+        while IFS= read -r -d '' file; do
+          if [ -f "metro-ai-suites-repo/image-based-video-search/$file" ]; then
+            python_files+=("/src/metro-ai-suites-repo/image-based-video-search/$file")
+          fi
+        done < <(jq -j '.[] | . + "\u0000"' <<< "$BANDIT_FILES")
+        if [ "${#python_files[@]}" -gt 0 ]; then
+          docker pull ghcr.io/pycqa/bandit/bandit
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" ghcr.io/pycqa/bandit/bandit "${python_files[@]}" -f txt -o /src/reports/bandit-report.txt || true
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" ghcr.io/pycqa/bandit/bandit "${python_files[@]}" -f json -o /src/reports/bandit-report.json || bandit_exit=$?
+        else
+          printf '{"results":[]}\n' > reports/bandit-report.json
+          : > reports/bandit-report.txt
+        fi
+        echo "exit_code=$bandit_exit" >> "$GITHUB_OUTPUT"
+        echo "file_count=${#python_files[@]}" >> "$GITHUB_OUTPUT"
 
     - name: Summarize Bandit findings
       if: always()
+      env:
+        BANDIT_FILE_COUNT: ${{ steps.run-bandit.outputs.file_count }}
       run: |
         report="reports/bandit-report.json"
         echo "## Bandit Scan Findings" >> "$GITHUB_STEP_SUMMARY"
         if [ ! -s "$report" ]; then
           echo "Bandit JSON report was not generated. See bandit-report.txt for scan output." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        if [ "$BANDIT_FILE_COUNT" -eq 0 ]; then
+          echo "No supporting file changes; Bandit scan passed without running." >> "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
         high_count=$(jq '[.results[]? | select(.issue_severity == "HIGH")] | length' "$report")
@@ -324,6 +508,31 @@ jobs:
           echo "has_high=false" >> "$GITHUB_OUTPUT"
         fi
         echo "Bandit HIGH findings: $high_count"
+    - name: Enforce scanner findings
+      if: always()
+      env:
+        SHELLCHECK_EXIT: ${{ steps.run-shellcheck.outputs.exit_code }}
+        BANDIT_EXIT: ${{ steps.run-bandit.outputs.exit_code }}
+        BANDIT_HIGH: ${{ steps.collect-bandit-high.outputs.has_high }}
+      run: |
+        failed=0
+        if [ "$SHELLCHECK_EXIT" != "0" ]; then
+          echo "::error title=ShellCheck Errors::ShellCheck reported error-level findings."
+          failed=1
+        fi
+        if [ "$BANDIT_HIGH" = "true" ]; then
+          echo "::error title=Bandit Findings::Bandit found HIGH severity issues."
+          failed=1
+        fi
+        if [ ! -s reports/bandit-report.json ]; then
+          echo "::error title=Bandit Report Missing::Bandit did not produce a JSON report."
+          failed=1
+        fi
+        case "$BANDIT_EXIT" in
+          ""|0|1) ;;
+          *) echo "::error title=Bandit Execution Failed::Bandit exited with code $BANDIT_EXIT."; failed=1 ;;
+        esac
+        exit "$failed"
     - name: Upload Scan Reports
       if: always()
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f #v6.0.0
@@ -336,36 +545,3 @@ jobs:
         if [ -n "$(docker images -aq)" ]; then
                docker rmi -f $(docker images -aq) || true
         fi
-
-  comment-high-findings:
-    name: Comment on HIGH findings
-    runs-on: ubuntu-latest
-    needs: [Build-DBS-Trivy, virus-bandit-scan]
-    if: always() && github.event_name == 'pull_request' && (needs.Build-DBS-Trivy.outputs.high_findings == 'true' || needs.virus-bandit-scan.outputs.high_findings == 'true')
-    permissions:
-      actions: read
-      pull-requests: write
-    steps:
-      - name: Create or update HIGH findings comment
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TRIVY_HIGH: ${{ needs.Build-DBS-Trivy.outputs.high_findings }}
-          BANDIT_HIGH: ${{ needs.virus-bandit-scan.outputs.high_findings }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          marker="<!-- ibvs-high-security-findings -->"
-          body="$marker"$'\n\n'"## HIGH severity security findings"$'\n'"HIGH-severity findings were detected. Review the scan job(s) below:"
-          if [ "$TRIVY_HIGH" = "true" ]; then
-            trivy_job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate --jq '.jobs[] | select(.name == "Build IBVS App and run scans DBS, trivy image fs config") | .html_url' | head -n 1)
-            body+=$'\n'"| Trivy image/config/filesystem scan | [Open job]($trivy_job) |"
-          fi
-          if [ "$BANDIT_HIGH" = "true" ]; then
-            bandit_job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --paginate --jq '.jobs[] | select(.name == "Run Bandit Virus Scans") | .html_url' | head -n 1)
-            body+=$'\n'"| Bandit scan | [Open job]($bandit_job) |"
-          fi
-          comment_id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate --jq '.[] | select(.user.login == "github-actions[bot]" and ((.body // "") | contains("<!-- ibvs-high-security-findings -->"))) | .id' | tail -n 1)
-          if [ -n "$comment_id" ]; then
-            gh api "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --method PATCH --field body="$body" > /dev/null
-          else
-            gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --method POST --field body="$body" > /dev/null
-          fi

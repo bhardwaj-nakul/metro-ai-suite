@@ -1,13 +1,13 @@
-# Pipeline Defect Detection — Agentic Predictive Maintenance for Critical Infrastructure
+# Pipeline Defect Detection — Agentic Predictive Maintenance
 
 This directory contains the use-case-specific configuration for the
 **Pipeline Defect Detection** sample application, built on the
-Agentic Predictive Maintenance for Critical Infrastructure Blueprint.
+Agentic Predictive Maintenance Blueprint from `metro-ai-suite`.
 
 ## Quick Start
 
 ```bash
-cd <metro-ai-suite>/agentic-predictive-maintenance-pipeline
+cd metro-ai-suite/agentic-predictive-maintenance
 ./setup.sh --use-case pipeline-defect-detection \
   --use-case-dir <path-to-this-directory>
 ```
