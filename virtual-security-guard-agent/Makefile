@@ -9,7 +9,7 @@ SHELL := /bin/bash
 UI_DIR      := ui
 COMPOSE     := docker compose -f deploy/compose.yaml
 REGISTRY    ?=
-TAG         ?= latest
+TAG         ?= 2026.3.0-rc1
 IMAGE       := $(REGISTRY)intel/vsg-ui:$(TAG)
 # Where `make install-skills` puts SOUL.md and the skills (run on the Hermes host).
 HERMES_HOME ?= $(HOME)/.hermes

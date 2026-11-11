@@ -25,9 +25,9 @@ the VSG agent skills from the VSG source in `metro-ai-suite`. Clone both into
 the same directory:
 
 ```bash
-git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/edge-ai-libraries.git
+git clone --filter=blob:none --sparse --branch release-2026.3.0 https://github.com/open-edge-platform/edge-ai-libraries.git
 git -C edge-ai-libraries sparse-checkout set sample-applications/video-search-and-summarization frameworks/agent-harness-install
-git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/metro-ai-suite.git
+git clone --filter=blob:none --sparse --branch release-2026.3.0 https://github.com/open-edge-platform/metro-ai-suite.git
 git -C metro-ai-suite sparse-checkout set virtual-security-guard-agent
 ```
 
@@ -39,7 +39,7 @@ Choose the service credentials and start VSS:
 
 ```bash
 cd edge-ai-libraries/sample-applications/video-search-and-summarization
-export REGISTRY_URL=intel TAG=latest
+export REGISTRY_URL=intel TAG=2026.3.0-rc1
 export MINIO_ROOT_USER=<user> MINIO_ROOT_PASSWORD=<password>
 export POSTGRES_USER=<user> POSTGRES_PASSWORD=<password>
 export RABBITMQ_USER=<user> RABBITMQ_PASSWORD=<password>
@@ -51,12 +51,12 @@ source setup.sh --search
 Open `http://<vss-host>:12345/` to check that VSS is up. VSG and the VSS MCP
 server both use this address. For GPU embedding, the Milvus vector database
 backend, proxy settings, and other options, see the VSS
-[Get Started](https://github.com/open-edge-platform/edge-ai-libraries/blob/main/sample-applications/video-search-and-summarization/docs/user-guide/get-started.md)
+[Get Started](https://github.com/open-edge-platform/edge-ai-libraries/blob/release-2026.3.0/sample-applications/video-search-and-summarization/docs/user-guide/get-started.md)
 guide.
 
 ## 3. Install the Hermes Agent Server and OpenVINO Model Server
 
-The [agent-harness-install](https://github.com/open-edge-platform/edge-ai-libraries/tree/main/frameworks/agent-harness-install)
+The [agent-harness-install](https://github.com/open-edge-platform/edge-ai-libraries/tree/release-2026.3.0/frameworks/agent-harness-install)
 installer starts the OpenVINO model server and the **Inference Router** in Docker,
 installs the Hermes agent server, and connects the agent server to the router.
 Follow steps 4 through 7 to configure the Hermes agent server for VSG.
@@ -83,7 +83,7 @@ export HARNESS_OVMS_REST_PORT=8450 && ./install.sh --harness hermes --model "$MO
   from other machines.
 - The installer installs Docker Engine, Node.js runtime, and the Python interpreter
   if they are missing, and checks the Intel® GPU. See
-  [Get Started](https://github.com/open-edge-platform/edge-ai-libraries/blob/main/frameworks/agent-harness-install/docs/user-guide/get-started.md)
+  [Get Started](https://github.com/open-edge-platform/edge-ai-libraries/blob/release-2026.3.0/frameworks/agent-harness-install/docs/user-guide/get-started.md)
   for all options.
 - The model is already in OpenVINO IR format, so OpenVINO model server downloads
   it without
