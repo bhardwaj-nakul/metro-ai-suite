@@ -3,10 +3,10 @@
 #
 # Smart-Community stack assembled from upstream with MINIMAL local deltas — the
 # heavy service definitions are deliberately NOT copied here:
-#   * vllm-ipex-serving + multilevel-video-understanding are `extends`-ed from the
+#   * model-serving + multilevel-video-understanding are `extends`-ed from the
 #     upstream edge-ai-libraries compose, which setup_docker.sh fetches into the
 #     fixed path ../.external/edge-ai-libraries. `extends` resolves THAT file's own
-#     relative paths (build context, ./vllm-serving) against its own directory, so
+#     relative paths (build context and backend launcher) against its own directory, so
 #     nothing is re-copied and upstream changes flow through automatically.
 #   * videostream-analytics is `extends`-ed from its own docker-compose.yaml (host
 #     network, NPU, POSTs events to the Smart Community MCP webhook on :3101).
@@ -16,32 +16,20 @@
 #     `docker compose up`.
 # Every service is `extends`-ed from its source file, which keeps each definition's
 # relative paths self-relative; the smart-community deltas defined inline below are
-# the /data bind mount on multilevel and the MCP server's depends_on (extends does
-# not copy depends_on).
+# the identity bind mount on multilevel and the MCP server's dependencies.
 #
 # Prereq: `source docker/set_env.sh` (model/service env) and `setup_docker.sh`
 # having fetched edge-ai-libraries into ../.external/edge-ai-libraries.
 
 services:
 
-  # Inherit upstream's on-device model serving, then confine its published port.
-  vllm-ipex-serving:
-    container_name: vllm-ipex-serving
-    image: ${VLLM_IMAGE:-intel/llm-scaler-vllm:0.14.0-b8.3.2}
+  # Inherit the upstream model-serving backend and its published port.
+  model-serving:
     extends:
       file: ../.external/edge-ai-libraries/microservices/multilevel-video-understanding/docker/compose.yaml
-      service: vllm-ipex-serving
-    # Upstream publishes this on 0.0.0.0 — an unauthenticated inference endpoint
-    # open to the whole LAN. Default to loopback; nothing off-host needs it in the
-    # single-host deployment. VLLM_BIND_HOST opts in when the model stack runs on a
-    # dedicated box, and drives multilevel below too so the two can't drift apart.
-    #
-    # `!override` REPLACES the inherited list — without it Compose appends and
-    # upstream's 0.0.0.0 mapping survives. Verify with `docker compose config`.
-    ports: !override
-      - "${VLLM_BIND_HOST:-127.0.0.1}:${VLLM_SERVICE_PORT:-41091}:8000"
+      service: model-serving
     healthcheck:
-      # First launch downloads + compiles the model (about 30 mins); give it room.
+      # Allow model loading and profiling before health failures count.
       start_period: 7200s
       start_interval: 10s
 
@@ -56,12 +44,8 @@ services:
       file: ../.external/edge-ai-libraries/microservices/multilevel-video-understanding/docker/compose.yaml
       service: multilevel-video-understanding
     depends_on:
-      vllm-ipex-serving:
+      model-serving:
         condition: service_healthy
-    # Same as vllm above: upstream publishes on 0.0.0.0 and the summary API is
-    # unauthenticated. Shares VLLM_BIND_HOST — see the note there.
-    ports: !override
-      - "${VLLM_BIND_HOST:-127.0.0.1}:${SERVICE_PORT:-8192}:8000"
     healthcheck:
       start_period: 7200s
       start_interval: 10s
@@ -84,8 +68,7 @@ services:
       service: videostream-analytics
 
   # Inherit the MCP server definition from mcp-server/docker-compose.yaml, then add
-  # ONLY the depends_on (extends does not copy it, so it is restated here — same as
-  # multilevel's depends_on: vllm-ipex-serving above).
+  # the application dependencies required before MCP startup.
   smart-community-mcp-server:
     container_name: smart-community-mcp-server
     image: ${REGISTRY:-}smart-community-mcp-server:${TAG:-latest}

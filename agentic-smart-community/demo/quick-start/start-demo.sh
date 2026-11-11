@@ -92,11 +92,11 @@ rm -f "$FILTERED_MONITORS"
 rm -f "$RUNTIME_CONFIG"
 trap - EXIT
 
-# 4. Bring up the stack, reusing an already-warm vllm-ipex-serving. If the app tier
+# 4. Bring up the stack, reusing an already-warm model serving. If the app tier
 #    is already running, bounce it first (--light-down then --light) so the MCP
 #    server restarts and reloads the demo config written above. --light-down stops
 #    only the app tier (mcp + multilevel + videostream-analytics) and leaves
-#    vllm-ipex-serving running, so its 3-20 min recompile is never repaid.
+#    model serving running to avoid model reload.
 if [ -n "$(docker compose -f "$REPO_DIR/docker/compose.yaml" ps -q \
     smart-community-mcp-server multilevel-video-understanding videostream-analytics 2>/dev/null)" ]; then
   echo "app tier already running — bouncing it (--light-down) to reload the demo config…"

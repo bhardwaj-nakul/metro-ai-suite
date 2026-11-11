@@ -10,6 +10,7 @@
     "build": "npm run build --workspace=packages/dashboard && tsc -b",
     "clean": "tsc -b --clean",
     "dev": "npm run dev --workspace=packages/mcp-server",
+    "test:deployment": "node --test tests/deployment/*.test.mjs",
     "test:tools": "node --import tsx --test tests/tools/*.test.ts",
     "test:mcp-server": "node --import tsx --test tests/mcp-server/*.test.ts"
   },

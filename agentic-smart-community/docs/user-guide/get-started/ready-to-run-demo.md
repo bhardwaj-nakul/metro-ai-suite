@@ -46,7 +46,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 bash demo/quick-start/start-demo.sh
 ```
 
-This one-shot launcher pushes the demo RTSP streams, writes the demo config/monitors into `$SMART_COMMUNITY_DATA_DIR`, then brings the stack up with `setup_docker.sh --light` (reusing an already-warm `vllm-ipex-serving`) and reloads the `smart-community-mcp-server` container so it picks up the demo config. No separate MCP-server start is needed — it runs as a container in the stack.
+This one-shot launcher pushes the demo RTSP streams, writes the demo config/monitors into `$SMART_COMMUNITY_DATA_DIR`, then brings the stack up with `setup_docker.sh --light` (reusing an already-warm `model-serving-llm-scaler`) and reloads the `smart-community-mcp-server` container so it picks up the demo config. No separate MCP-server start is needed — it runs as a container in the stack.
 
 The launcher writes [config.demo.yaml](https://github.com/open-edge-platform/metro-ai-suite/blob/main/agentic-smart-community/demo/quick-start/config.demo.yaml) to `$SMART_COMMUNITY_DATA_DIR/config.yaml`. It filters [monitors.demo.yaml](https://github.com/open-edge-platform/metro-ai-suite/blob/main/agentic-smart-community/demo/quick-start/monitors.demo.yaml) to the active streams and writes the result to `$SMART_COMMUNITY_DATA_DIR/monitors.yaml`. The MCP server then starts with these two files.
 
@@ -172,10 +172,10 @@ These are conversation starters, not a required script. Try your own wording, co
 
 ## Step 6 - Stop the demo
 
-Stop the demo RTSP pushers and the app tier (MCP server + analytics + video-summary) together, leaving `vllm-ipex-serving` running so its multi-minute recompile is not repaid on the next start:
+Stop the demo RTSP pushers and the app tier (MCP server + analytics + video-summary) together, leaving `model-serving-llm-scaler` running to avoid model reload on the next start:
 
 ```bash
 bash demo/quick-start/stop-demo.sh
 ```
 
-To tear the whole stack down, including `vllm-ipex-serving`, run `bash setup_docker.sh --down`.
+To tear the whole stack down, including `model-serving-llm-scaler`, run `bash setup_docker.sh --down`.

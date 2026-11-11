@@ -1,6 +1,6 @@
 # Add Swap Space
 
-`Qwen/Qwen3.6-35B-A3B` in FP8 with a 60k context window is memory-hungry on a shared-RAM host. On the on-device PTL profile, provide at least **32 GB of swap** so the weight load and KV cache can spill under peak pressure without the OOM killer stepping in. On an NVMe SSD (~3 GB/s) the model load is slower under swap, but it will not OOM.
+`Qwen/Qwen3.6-35B-A3B` in FP8 with a 60k context window is memory-intensive on a shared-RAM host. On the on-device PTL profile, provide at least **32 GB of swap** as a memory-pressure safety net. Swap can slow model loading and does not guarantee that model or device allocations will succeed; verify peak memory use on your deployment.
 
 ## Step 1. Check current swap
 

@@ -13,3 +13,13 @@ This initial release introduces an AI agent-native video analysis platform desig
 - **Conversational use-case customization**: lets users describe a monitoring need to an agent, which can create and configure a tailored use case through the platform.
 - **Bundled use cases**: includes Fridge, Child Safety, and Elder Wakeup use cases for immediate evaluation and customization.
 - **Operations dashboard**: provides a dashboard for viewing currently online monitors, detected events, and summarized activity.
+
+
+## Version 2026.3.0
+
+This release adds incremental use-case updates and per-monitor prefilter model selection.
+
+**New Features**:
+
+- **Incremental use-case updates**: lets users add, remove, or adjust detection events without recreating the use case, reusing unchanged settings and avoiding repeated generation and confirmation steps.
+- **Configurable prefilter models**: lets users discover, register, and switch OpenVINO™ detection models for each monitor through conversation.

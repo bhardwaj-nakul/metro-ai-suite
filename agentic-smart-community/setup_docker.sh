@@ -3,17 +3,17 @@
 # Copyright (C) 2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-set -e
+set -eo pipefail
 
 # Smart-Community on-device Docker setup.
 #
 # Orchestrates the full four-service stack defined in docker/compose.yaml:
-#   1. vllm-ipex-serving          (:41091) — on-device model serving (VLM+LLM)
+#   1. model-serving             (:41091) — llm-scaler serving (VLM+LLM)
 #   2. multilevel-video-understanding (:8192) — video summary microservice
 #   3. videostream-analytics      (host net) — RTSP capture + NPU YOLO prefilter,
 #                                              POSTs events to the MCP webhook :3101
 #   4. smart-community-mcp-server   (host net) — MCP server (:3100 MCP+UI, :3101 events)
-# videostream-analytics is pulled in via `include:` in docker/compose.yaml, so a
+# videostream-analytics is pulled in via `extends:` in docker/compose.yaml, so a
 # plain `docker compose` here manages all four as one project.
 
 RED='\033[0;31m'
@@ -24,7 +24,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DOCKER_DIR="${SCRIPT_DIR}/docker"
 
-# Load deployment env (group ids, model, ports, SMART_COMMUNITY_DATA_DIR, MODEL_DIR,
+# Load deployment env (group ids, model, ports, SMART_COMMUNITY_DATA_DIR,
 # WEBHOOK_URL, ...). Sourcing here makes the script self-contained.
 if [ -f "${DOCKER_DIR}/set_env.sh" ]; then
   # shellcheck disable=SC1091
@@ -40,9 +40,8 @@ source "${SCRIPT_DIR}/videostream-analytics/setup_vsa.sh"
 SERVICE_PORT=${SERVICE_PORT:-8192}
 VLLM_SERVICE_PORT=${VLLM_SERVICE_PORT:-41091}
 
-# Default action flags. With an unset or `latest` TAG, a start builds locally only
-# the images that are missing and runs the ones already present as they are (see
-# the build step below); a pinned TAG keeps the original pull-and-start behaviour.
+# For each application image, a missing `latest` tag builds locally; pinned tags
+# use published images. Existing local images are not rebuilt automatically.
 # Every build uses the Docker layer cache; --no-cache discards it.
 BUILD_IMAGE=false
 BUILD_NO_CACHE=false
@@ -55,13 +54,14 @@ FETCH_ONLY=false
 
 # Decide whether we manage the bundled on-device serving or the user has pointed
 # the stack at an external OpenAI-compatible serving. Driven by VLM/LLM base URL.
-VLLM_ENDPOINT="${VLM_BASE_URL:-${LLM_BASE_URL:-http://vllm-ipex-serving:8000/v1}}"
+VLLM_ENDPOINT="${VLM_BASE_URL:-${LLM_BASE_URL:-http://model-serving:8000/v1}}"
 case "$VLLM_ENDPOINT" in
-  *vllm-ipex-serving*) USE_LOCAL_VLLM=true ;;   # bundled service on app-network
-  *)                   USE_LOCAL_VLLM=false ;;  # external / remote serving
+  http://model-serving:8000/v1|http://model-serving:8000/v1/|http://model-serving-${MODEL_SERVING_BACKEND}:8000/v1|http://model-serving-${MODEL_SERVING_BACKEND}:8000/v1/)
+    USE_LOCAL_VLLM=true ;;
+  *) USE_LOCAL_VLLM=false ;;
 esac
 
-# Host-reachable readiness probe. The in-network name `vllm-ipex-serving` is not
+# Host-reachable readiness probe. The in-network name `model-serving` is not
 # resolvable from the host, so probe the mapped port; a remote endpoint directly.
 if [ "$USE_LOCAL_VLLM" = true ]; then
   VLLM_HEALTH_URL="http://localhost:${VLLM_SERVICE_PORT}/v1/models"
@@ -70,12 +70,13 @@ else
 fi
 
 is_vllm_healthy() {
-  curl -s --max-time 5 "$VLLM_HEALTH_URL" 2>/dev/null | grep -q '"id"'
+  curl -fsS --noproxy "${no_proxy:-localhost,127.0.0.1}" --max-time 5 \
+    -H "Authorization: Bearer ${VLM_API_KEY:-EMPTY}" "$VLLM_HEALTH_URL" 2>/dev/null | grep -q '"id"'
 }
 
 is_external_serving_reachable() {
   local status
-  status="$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' "$VLLM_ENDPOINT" 2>/dev/null || true)"
+  status="$(curl -s --noproxy "${no_proxy:-localhost,127.0.0.1}" --max-time 5 -o /dev/null -w '%{http_code}' "$VLLM_ENDPOINT" 2>/dev/null || true)"
   [ "$status" != "000" ] && [ -n "$status" ]
 }
 
@@ -83,9 +84,9 @@ is_external_serving_reachable() {
 # requested name must match an advertised ID; never select by list order.
 resolve_model_name() {
   local role="$1" base_url="$2" api_key="$3" requested="$4" models selected
-  models="$(curl -fsS --connect-timeout 3 --max-time 10 \
+  models="$(curl -fsS --noproxy "${no_proxy:-localhost,127.0.0.1}" --connect-timeout 3 --max-time 10 \
     -H "Authorization: Bearer ${api_key}" "${base_url%/}/models" 2>/dev/null \
-    | python3 -c 'import json, sys; print("\\n".join(str(item["id"]) for item in json.load(sys.stdin).get("data", []) if isinstance(item, dict) and item.get("id")))' 2>/dev/null || true)"
+    | jq -r '.data[]? | .id | select(type == "string" and length > 0)' 2>/dev/null || true)"
   if [ -z "$models" ]; then
     if [ -n "$requested" ]; then
       echo -e "${YELLOW}Warning: ${role} serving did not return a usable model list from ${base_url%/}/models; using configured model '${requested}' without validation.${NC}" >&2
@@ -149,7 +150,7 @@ prepare_mcp_config() {
   fi
 
   mcp_vlm_url="$VLM_BASE_URL"
-  if [[ "$mcp_vlm_url" == "http://vllm-ipex-serving:8000/v1" ]]; then
+  if [[ "$USE_LOCAL_VLLM" == true ]]; then
     mcp_vlm_url="http://localhost:${VLLM_SERVICE_PORT}/v1"
   fi
   content="${content//"$url_placeholder"/"$mcp_vlm_url"}"
@@ -161,16 +162,15 @@ prepare_mcp_config() {
 }
 
 # --- serving startup recovery --------------------------------------------------
-# compose.yaml gives vllm-ipex-serving `restart: always`, and multilevel/mcp-server
+# compose.yaml gives model-serving a bounded on-failure restart policy, and the apps
 # depend on it with `condition: service_healthy`. If the serving dies mid-weight-load
 # — most often the transient Intel Xe device-lost fault — compose abandons the whole
 # `up` immediately, while Docker restarts the container in the background and the
 # next attempt usually succeeds. The helpers below keep the script in step with that
 # background retry instead of exiting with a bare compose error.
-VLLM_CONTAINER="${VLLM_CONTAINER:-vllm-ipex-serving}"
+VLLM_CONTAINER="${VLLM_CONTAINER:-model-serving-${MODEL_SERVING_BACKEND}}"
 # Seconds to keep waiting for the restart policy to bring the serving back. 0 = don't wait.
-# A restart redoes the whole weight download + FP8 compile (about 30 min on a cold
-# cache), so leave roughly double that before calling it dead.
+# A restart repeats model loading and profiling; duration depends on the checkpoint and host.
 VLLM_RETRY_TIMEOUT="${VLLM_RETRY_TIMEOUT:-3600}"
 
 vllm_inspect()  { docker inspect -f "$1" "$VLLM_CONTAINER" 2>/dev/null || true; }
@@ -370,16 +370,17 @@ Smart-Community Docker Setup
 Usage: $0 [option]
 
 Options:
-  (no option) | --prod   End-to-end start of all three services. With TAG unset or `latest`,
+  (no option) | --prod   End-to-end start of all four services. With a tag unset or 'latest',
                          images that are missing are built locally and existing ones run as
-                         they are; with a pinned TAG the images are pulled
-                         (vllm-ipex-serving + multilevel-video-understanding + videostream-analytics)
+                         they are; pinned image tags are pulled
+                         (model-serving + multilevel-video-understanding + videostream-analytics
+                         + smart-community-mcp-server)
   --light                Reuse an already-healthy serving at VLM_BASE_URL/LLM_BASE_URL;
-                         start multilevel-video-understanding + videostream-analytics only
-                         (missing images are built for `latest`, as above)
+                         start multilevel-video-understanding + videostream-analytics
+                         + smart-community-mcp-server (missing 'latest' images are built)
   --no-cache             Build without the Docker layer cache (a clean rebuild; use with
                          --build, --build-prod, or the automatic build of missing images)
-  --no-build             Never build, even when an image is missing for `latest`; use the
+  --no-build             Never build, even when an image is missing for 'latest'; use the
                          images already present or pulled (e.g. --light --no-build)
   --fetch                Only clone/refresh edge-ai-libraries (multilevel build context), no build/start
   --build                Build the local images (multilevel + videostream-analytics
@@ -387,14 +388,13 @@ Options:
   --build-prod           Build, then start all four services
   --down                 Stop and remove all containers, networks, volumes
   --light-down           Stop multilevel + videostream-analytics + smart-community-mcp-server,
-                         but leave vllm-ipex-serving running (avoids its 3-20 min recompile)
+                         but leave the model serving running (avoids model reload)
   -h, --help             Show this help
 
 Environment:
-  VLLM_RETRY_TIMEOUT     Seconds to keep waiting when vllm-ipex-serving crashes during
+  VLLM_RETRY_TIMEOUT     Seconds to keep waiting when the model serving crashes during
                          startup and Docker's restart policy is retrying it in the
-                         background (default: 3600 — a retry redoes the full ~30 min
-                         weight load). Set to 0 to fail immediately.
+                         background (default: 3600). Set to 0 to fail immediately.
 
 Examples:
   source docker/set_env.sh   # optional; the script also sources it itself
@@ -446,10 +446,8 @@ if [ "$FETCH_ONLY" = true ]; then
 fi
 
 # --- build --------------------------------------------------------------------
-# --build / --build-prod build every service. Otherwise, for an unset or `latest`
-# TAG, a missing image is built locally rather than pulled — only the missing ones
-# — and images already present run as they are. A pinned release tag names a
-# published image: pull it, never build. --no-build overrides all of this.
+# --build / --build-prod build all application images. Automatic builds apply
+# only to missing `latest` images. --no-build skips builds.
 build_services=()
 if [ "$BUILD_IMAGE" = true ]; then
   build_services=(multilevel-video-understanding videostream-analytics smart-community-mcp-server)
@@ -494,9 +492,9 @@ if [ "$UP_CONTAINERS" = true ]; then
       echo "Model serving already healthy at ${VLLM_HEALTH_URL} — starting multilevel + videostream-analytics + smart-community-mcp-server only."
       compose_up --no-deps multilevel-video-understanding videostream-analytics smart-community-mcp-server || exit 1
     elif [ "$USE_LOCAL_VLLM" = true ]; then
-      echo "Local vllm-ipex-serving not healthy yet — starting it before the app tier."
-      echo "(first run pulls/compiles the model — this can take about 30 mins)"
-      compose_up vllm-ipex-serving || exit 1
+      echo "Local ${VLLM_CONTAINER} not healthy yet — starting it before the app tier."
+      echo "(model loading and profiling can take several minutes)"
+      compose_up model-serving || exit 1
       wait_for_vllm_healthy || { show_vllm_failure; exit 1; }
       resolve_serving_models || exit 1
       prepare_mcp_config || exit 1
@@ -514,8 +512,8 @@ if [ "$UP_CONTAINERS" = true ]; then
     # End-to-end: wait for the serving, resolve its advertised model, then start
     # the services that require a concrete VLM/LLM model ID.
     echo "Starting model serving..."
-    echo "(first run pulls/compiles the model in vllm-ipex-serving — this can take about 30 mins)"
-    compose_up vllm-ipex-serving || exit 1
+    echo "(model loading and profiling can take several minutes)"
+    compose_up model-serving || exit 1
     wait_for_vllm_healthy || { show_vllm_failure; exit 1; }
     resolve_serving_models || exit 1
     prepare_mcp_config || exit 1
@@ -538,10 +536,9 @@ if [ "$DOWN_CONTAINERS" = true ]; then
 fi
 
 # --- light-down ---------------------------------------------------------------
-# Stop the app tier but keep vllm-ipex-serving running so its multi-minute FP8
-# recompile is not paid again on the next start. Mirror of --light on the up side.
+# Stop the app tier but keep the model serving running to avoid model reload.
 if [ "$LIGHT_DOWN" = true ]; then
-  echo "Stopping smart-community-mcp-server + videostream-analytics + multilevel-video-understanding (leaving vllm-ipex-serving running)..."
+  echo "Stopping smart-community-mcp-server + videostream-analytics + multilevel-video-understanding (leaving ${VLLM_CONTAINER} running)..."
   $DOCKER_CMD rm -sf smart-community-mcp-server videostream-analytics multilevel-video-understanding
-  echo "==== App tier stopped; vllm-ipex-serving left running. ===="
+  echo "==== App tier stopped; ${VLLM_CONTAINER} left running. ===="
 fi

@@ -37,7 +37,7 @@ This guide assumes basic familiarity with Docker commands and terminal usage. Fo
 
 `Qwen/Qwen3.6-35B-A3B` in FP8 with a 60k context window is memory-intensive on a shared-RAM host. The default configuration targets a **64 GB system**:
 
-- Provide at least **32 GB of swap** so weight loading and the KV cache can spill under peak pressure without triggering the OOM killer. See how to [Add Swap Space](./how-to-guides/add-swap.md).
+- Provide at least **32 GB of swap** as a memory-pressure safety net; swap does not guarantee that model or device allocations will succeed. See how to [Add Swap Space](./how-to-guides/add-swap.md).
 The **first startup takes about 30 minutes** while the weights are downloaded and compiled. The serving becomes healthy once it answers on `http://<host>:41091/v1/models`.
 
 ## Step-by-step installation
@@ -55,7 +55,7 @@ The on-device stack is defined in [docker/compose.yaml](https://github.com/open-
 
 | Service                          | Port                       | Role                                                                              |
 | -------------------------------- | -------------------------- | --------------------------------------------------------------------------------- |
-| `vllm-ipex-serving`              | `:41091`                   | On-device model serving for VLM and LLM requests                                  |
+| `model-serving`                  | `:41091`                   | On-device llm-scaler serving for VLM and LLM requests (container: `model-serving-llm-scaler`) |
 | `multilevel-video-understanding` | `:8192`                    | Video-summary microservice                                                        |
 | `videostream-analytics`          | `:8999`                    | Video capture and optional detector-as-prefilter; posts events to the MCP webhook |
 | `smart-community-mcp-server`       | `:3100` (+`:3101` webhook) | MCP server: Streamable-HTTP + Web UI, and the events webhook                      |
@@ -76,22 +76,20 @@ Customize `$SMART_COMMUNITY_DATA_DIR/config.yaml` and `$SMART_COMMUNITY_DATA_DIR
 # Change to mirror endpoint if you are in China and want to use the mirror site for Hugging Face.
 export HF_ENDPOINT=https://hf-mirror.com
 
+export TAG=2026.3.0
 source docker/set_env.sh
 
 # Start all four on-device services.
 bash setup_docker.sh
 ```
 
-With `TAG` unset or `latest`, `setup_docker.sh` builds a service image from the working tree when it is not present locally, and runs the images already present as they are. With a pinned release tag such as `TAG=2026.2.0` it pulls the published images and builds nothing. Add `--no-build` to never build; see [Build the service images from source](#build-the-service-images-from-source).
-
 **Reuse an existing model serving:** Replace only this Step 1 startup procedure as described in [Use an existing model serving](#use-an-existing-model-serving). After the application tier starts, continue with [Step 2 - Verify the MCP server](#step-2---verify-the-mcp-server) and the remaining steps.
 
 > [!NOTE]
 >
+> - This guide uses the stable release `2026.3.0` by default; to apply the latest code changes, rebuild the images from source as described in [Build the service images from source](#build-the-service-images-from-source).
 > - Use `bash setup_docker.sh --light` to reuse an already warm serving and start only `multilevel-video-understanding`, `videostream-analytics`, and `smart-community-mcp-server`.
-> - Use `bash setup_docker.sh --light-down` to stop the app tier while leaving `vllm-ipex-serving` running (avoids its 3-20 min recompile), or `bash setup_docker.sh --down` to stop all four services.
-> - If the YOLO11s OpenVINO™ IR is missing, `setup_docker.sh` automatically downloads the model and converts it before starting `videostream-analytics`.
-> - If `vllm-ipex-serving` crashes while loading weights, Docker restarts it and `setup_docker.sh` waits up to one hour. Set `VLLM_RETRY_TIMEOUT=<seconds>` to change this; `0` stops immediately. On failure, the script reports the likely cause and stops all containers, but preserves volumes and cached model weights.
+> - Use `bash setup_docker.sh --light-down` to stop the app tier while leaving `model-serving-llm-scaler` running (avoids model reload), or `bash setup_docker.sh --down` to stop all four services.
 
 Confirm the model serving is ready before continuing:
 
@@ -149,7 +147,7 @@ Open `http://localhost:3100/` to use the Agentic Smart Community Web UI. It prov
 
 1. Install OpenClaw using the official [OpenClaw documentation](https://openclaw.ai/), or use [our validated platform guide](https://github.com/open-edge-platform/metro-ai-suite/blob/main/agentic-smart-community/scripts/openclaw/README.md).
 
-2. Ensure that OpenClaw has a valid model provider configured, such as MiniMax, Kimi, DeepSeek, etc. Alternatively, run the following script to add the model served by `vllm-ipex-serving` from [Step 1 - Start all services](#step-1---start-all-services), into `~/.openclaw/openclaw.json`:
+2. Ensure that OpenClaw has a valid model provider configured, such as MiniMax, Kimi, DeepSeek, etc. Alternatively, run the following script to add the model served by `model-serving-llm-scaler` from [Step 1 - Start all services](#step-1---start-all-services), into `~/.openclaw/openclaw.json`:
 
    ```bash
    bash scripts/openclaw/configure_local_model.sh
@@ -305,7 +303,9 @@ Furthermore, you can simply describe your requirements to an agent to create a c
 
 ## Build the service images from source
 
-When `TAG` is unset or `latest`, `setup_docker.sh` builds any of these images that is missing locally, using the Docker layer cache, and runs the ones already present. With a pinned `TAG`, or with `--no-build`, it uses the prebuilt images from Docker Hub instead — [intel/multilevel-video-understanding](https://hub.docker.com/r/intel/multilevel-video-understanding), [intel/smart-community-mcp-server](https://hub.docker.com/r/intel/smart-community-mcp-server), and [intel/videostream-analytics](https://hub.docker.com/r/intel/videostream-analytics) — and `vllm-ipex-serving` runs from the upstream `intel/llm-scaler-vllm` image. An existing local image is not rebuilt automatically, and the images bake in the service code while the configuration is regenerated on every deploy: after you change the service code, run `--build` (or `--build-prod`) to refresh them, or a stale image paired with fresh configuration can fail at startup. Every build uses the Docker layer cache, so an unchanged tree is quick; add `--no-cache` for a clean rebuild.
+All three application images use `TAG`: [intel/multilevel-video-understanding](https://hub.docker.com/r/intel/multilevel-video-understanding), [intel/smart-community-mcp-server](https://hub.docker.com/r/intel/smart-community-mcp-server), and [intel/videostream-analytics](https://hub.docker.com/r/intel/videostream-analytics). Missing `latest` images are built locally; pinned tags use prebuilt images. The model serving uses `intel/llm-scaler-vllm:0.14.0-b8.3.2`.
+
+Existing local images are not rebuilt automatically. After updating the MLVU source or other service code, run `--build` or `--build-prod` to refresh the application images. Add `--no-cache` for a clean rebuild.
 
 ```bash
 source docker/set_env.sh
@@ -321,17 +321,18 @@ Building takes considerably longer than pulling. `setup_docker.sh` clones the `m
 To pre-stage the prebuilt images instead — for example on a host with restricted network access at deployment time — pull them explicitly:
 
 ```bash
-docker pull intel/multilevel-video-understanding:2026.2.0
-docker pull intel/smart-community-mcp-server:2026.2.0
-docker pull intel/videostream-analytics:2026.2.0
+docker pull intel/multilevel-video-understanding:2026.3.0
+docker pull intel/smart-community-mcp-server:2026.3.0
+docker pull intel/videostream-analytics:2026.3.0
+export TAG=2026.3.0
 ```
 
 > [!NOTE]
-> `setup_docker.sh` resolves each image as `${REGISTRY_URL}<service>:${TAG}`, which with the defaults in [docker/set_env.sh](https://github.com/open-edge-platform/metro-ai-suite/blob/main/agentic-smart-community/docker/set_env.sh). Export `TAG` before sourcing `docker/set_env.sh` so it matches the tag you pulled or built.
+> Set `TAG` to match the images you pulled or built.
 
 ## Use an existing model serving
 
-Instead of the bundled `vllm-ipex-serving`, you can reuse an OpenAI-compatible serving that accepts text and image inputs.
+Instead of the bundled `model-serving-llm-scaler`, you can reuse an OpenAI-compatible serving that supports MLVU video inputs.
 
 Set the standard variables before starting the application tier:
 

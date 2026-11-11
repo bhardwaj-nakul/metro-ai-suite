@@ -38,6 +38,14 @@ Tests use free local ports and temporary directories. They do not connect to the
 
 ## Run tests
 
+Run the deployment-script tests with Node.js, Bash, and `jq`:
+
+```bash
+npm run test:deployment
+```
+
+These tests copy the launchers into temporary directories and mock Docker, Git, model HTTP responses, and analytics preparation. They cover environment defaults/reset, model discovery, lightweight startup/shutdown, recovery, and image tags without starting services or downloading models.
+
 Run the mock-based API suite:
 
 ```bash
