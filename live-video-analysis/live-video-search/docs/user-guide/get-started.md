@@ -40,7 +40,7 @@ Before running the application, you need to set several environment variables:
     export TAG=2026.3.0-rc1
     ```
 
-    The release defaults pin the VSS Search images to `2026.3.0-rc1` and the Smart NVR Event Router to `2026.3.0-20261103-weekly`.
+    The release defaults pin the VSS Search images and the Smart NVR Event Router to `2026.3.0-rc1`.
 
     **Override tags per stack (recommended for mixed release cycles):**
 
@@ -53,10 +53,10 @@ Before running the application, you need to set several environment variables:
      ```bash
      export TAG=2026.3.0-rc1
      export VSS_STACK_TAG=2026.3.0-rc1
-     export SMART_NVR_STACK_TAG=2026.3.0-20261103-weekly
+     export SMART_NVR_STACK_TAG=2026.3.0-rc1
      ```
 
-    The Smart NVR Event Router does not currently publish a `2026.3.0-rc1` image, so its default is the latest published 2026.3 weekly image. Set these overrides when building or selecting other stack versions.
+    Set these overrides when building or selecting other stack versions.
 
     Explicitly export `VSS_STACK_TAG` and `SMART_NVR_STACK_TAG` only when the two upstream stacks need different tags.
 

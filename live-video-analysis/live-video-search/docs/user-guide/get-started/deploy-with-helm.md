@@ -85,7 +85,7 @@ Common optional values:
 | `global.registry` | Optional image registry override | `intel` |
 | `global.tag` | Shared image tag | `2026.3.0-rc1` |
 | `global.vssStackTag` | Override tag for VSS stack services | `2026.3.0-rc1` |
-| `global.smartNvrStackTag` | Override tag for Smart NVR services | `2026.3.0-20261103-weekly` |
+| `global.smartNvrStackTag` | Override tag for Smart NVR services | `2026.3.0-rc1` |
 | `global.pullPolicy` | Pull-policy override for application images selected by the shared or stack-specific tags | `Always`, `IfNotPresent`, or `Never` |
 | `global.vectordbBackend` | Vector database used by Multimodal DataPrep and Vector Retriever | `vdms` (default) or `milvus` |
 | `global.metricsManager.enabled` | Deploy Metrics Manager and enable live system/DataPrep metrics | `true` (default) or `false` |

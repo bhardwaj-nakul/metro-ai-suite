@@ -142,7 +142,7 @@ export ENABLE_METRICS_MANAGER=${ENABLE_METRICS_MANAGER:-true}
 
 # Stack-specific image tags (override-able via env vars)
 export VSS_STACK_TAG=${VSS_STACK_TAG:-$TAG}
-export SMART_NVR_STACK_TAG=${SMART_NVR_STACK_TAG:-2026.3.0-20261103-weekly}
+export SMART_NVR_STACK_TAG=${SMART_NVR_STACK_TAG:-2026.3.0-rc1}
 
 [[ -n "$REGISTRY_URL" ]] && REGISTRY_URL="${REGISTRY_URL%/}/"
 [[ -n "$PROJECT_NAME" ]] && PROJECT_NAME="${PROJECT_NAME%/}/"

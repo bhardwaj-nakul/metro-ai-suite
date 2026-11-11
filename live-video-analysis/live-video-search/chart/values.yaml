@@ -2,7 +2,7 @@ global:
   registry: "intel"
   tag: "2026.3.0-rc1"
   vssStackTag: ""
-  smartNvrStackTag: "2026.3.0-20261103-weekly"
+  smartNvrStackTag: "2026.3.0-rc1"
   pullPolicy: ""
   vectordbBackend: "vdms" # vdms | milvus
 

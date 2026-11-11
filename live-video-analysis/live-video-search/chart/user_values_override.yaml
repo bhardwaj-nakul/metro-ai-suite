@@ -6,7 +6,7 @@ global:
   registry: ''
   tag: '2026.3.0-rc1'
   vssStackTag: ''
-  smartNvrStackTag: '2026.3.0-20261103-weekly'
+  smartNvrStackTag: '2026.3.0-rc1'
   # Single pull-policy override for the LVS, VSS, and Smart NVR application
   # images selected by the tags above. Leave empty to retain each image's
   # subchart default; set to Always, IfNotPresent, or Never to override all
