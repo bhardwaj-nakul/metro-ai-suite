@@ -326,6 +326,7 @@ services:
       - "8080:8080"
     devices:
       - "/dev/dri:/dev/dri"
+      - "/dev/accel:/dev/accel"
     group_add:
       - "109"
       - "110"
@@ -431,6 +432,7 @@ services:
       - SCENE_ID=${SCENE_ID:-}
     devices:
       - "/dev/dri:/dev/dri"
+      - "/dev/accel:/dev/accel"
     cap_add:
       - PERFMON
     volumes:
