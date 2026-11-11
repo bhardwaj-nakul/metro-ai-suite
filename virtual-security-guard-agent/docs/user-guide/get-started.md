@@ -34,7 +34,7 @@ Go to the cloned source directory and run `cd metro-ai-suite/virtual-security-gu
 Otherwise, clone it:
 
 ```bash
-git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/metro-ai-suite.git
+git clone --filter=blob:none --sparse --branch release-2026.3.0 https://github.com/open-edge-platform/metro-ai-suite.git
 cd metro-ai-suite
 git sparse-checkout set virtual-security-guard-agent
 cd virtual-security-guard-agent
@@ -66,9 +66,11 @@ To change other settings, edit `deploy/.env`:
 | `VSG_FLOORPLAN` | `simple` | Default floorplan: `deploy/floorplans/<name>.json`, mounted into the container. Ships with `simple` (`camera_1`…`camera_4`) and `level4`. See [Configure the Floorplan](./how-to-guides/configure-floorplan.md). |
 | `VSG_UI_HOST` | `0.0.0.0` | Set `VSG_UI_HOST` to `127.0.0.1`, to keep the console local. |
 | `VSG_UI_PORT` | `12346` | Console port. |
+| `TAG` | `2026.3.0-rc1` | VSG UI image tag. |
 
 `REGISTRY` and `TAG` select the image. With `make`, pass them as arguments (see
-[Build from Source](./get-started/build-from-source.md)).
+[Build from Source](./get-started/build-from-source.md)). If `deploy/.env`
+already exists, update its `TAG` to `2026.3.0-rc1`; `make env` preserves it.
 
 > [!IMPORTANT]
 > `deploy/.env` holds the Hermes API key. Never commit it.
