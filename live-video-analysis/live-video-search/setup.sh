@@ -137,12 +137,12 @@ fi
 
 export APP_HOST_PORT=${APP_HOST_PORT:-12345}
 export HOST_IP=$(get_host_ip)
-export TAG=${TAG:-latest}
+export TAG=${TAG:-2026.3.0-rc1}
 export ENABLE_METRICS_MANAGER=${ENABLE_METRICS_MANAGER:-true}
 
 # Stack-specific image tags (override-able via env vars)
 export VSS_STACK_TAG=${VSS_STACK_TAG:-$TAG}
-export SMART_NVR_STACK_TAG=${SMART_NVR_STACK_TAG:-$TAG}
+export SMART_NVR_STACK_TAG=${SMART_NVR_STACK_TAG:-2026.3.0-20261103-weekly}
 
 [[ -n "$REGISTRY_URL" ]] && REGISTRY_URL="${REGISTRY_URL%/}/"
 [[ -n "$PROJECT_NAME" ]] && PROJECT_NAME="${PROJECT_NAME%/}/"

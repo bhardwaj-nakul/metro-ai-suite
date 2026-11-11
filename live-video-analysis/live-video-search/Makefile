@@ -21,7 +21,7 @@
 #
 # Configuration:
 #   REGISTRY_URL              - Image registry prefix (default: intel)
-#   TAG                       - Shared image tag (default: latest)
+#   TAG                       - Shared image tag (default: 2026.3.0-rc1)
 #   MULTIMODAL_EMBEDDING_MODEL - Embedding model (default: CLIP/clip-vit-b-32)
 #   DATAPREP_EMBEDDING_DEVICE - Indexing embedding device (default: CPU)
 #   DATAPREP_DETECTION_DEVICE - Object detection device (default: CPU)
@@ -50,7 +50,7 @@ SHELL := bash
 # ==============================================================================
 
 SERVICE_NAME := live-video-search
-VERSION ?= latest
+VERSION ?= 2026.3.0-rc1
 
 # ==============================================================================
 # Image Configuration
@@ -59,9 +59,9 @@ VERSION ?= latest
 # Registry and tag defaults
 REGISTRY_URL ?= intel
 PROJECT_NAME ?=
-TAG ?= latest
+TAG ?= 2026.3.0-rc1
 VSS_STACK_TAG ?= $(TAG)
-SMART_NVR_STACK_TAG ?= $(TAG)
+SMART_NVR_STACK_TAG ?= 2026.3.0-20261103-weekly
 
 # Compute REGISTRY the same way setup.sh does: REGISTRY_URL/PROJECT_NAME/
 REGISTRY := $(if $(REGISTRY_URL),$(REGISTRY_URL)/)$(if $(PROJECT_NAME),$(PROJECT_NAME)/)
@@ -345,7 +345,7 @@ deploy-build-from-source:
 		echo "Folder exists, pulling latest changes..."; \
 		git -C edge-ai-libraries pull; \
 	else \
-		git clone https://github.com/open-edge-platform/edge-ai-libraries.git edge-ai-libraries; \
+		git clone --branch release-2026.3.0 https://github.com/open-edge-platform/edge-ai-libraries.git edge-ai-libraries; \
 	fi
 	echo "Building VSS Search stack from source..."
 	cd $(CURDIR)/edge-ai-libraries/sample-applications/video-search-and-summarization
@@ -619,9 +619,9 @@ help:
 	@echo "CONFIGURATION VARIABLES"
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "  REGISTRY_URL            Image registry prefix (default: intel)"
-	@echo "  TAG                     Shared image tag (default: latest)"
+	@echo "  TAG                     Shared image tag (default: 2026.3.0-rc1)"
 	@echo "  VSS_STACK_TAG           Override tag for VSS services (default: TAG)"
-	@echo "  SMART_NVR_STACK_TAG     Override tag for Smart NVR services (default: TAG)"
+	@echo "  SMART_NVR_STACK_TAG     Override tag for Smart NVR services (default: 2026.3.0-20261103-weekly)"
 	@echo "  MULTIMODAL_EMBEDDING_MODEL  Embedding model (default: CLIP/clip-vit-b-32)"
 	@echo "  APP_HOST_PORT           Main app port (default: 12345)"
 	@echo "  DATAPREP_EMBEDDING_DEVICE  Indexing embedding device: CPU, GPU, or NPU"

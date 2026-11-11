@@ -1,5 +1,5 @@
 apiVersion: v2
 name: init-resources
 description: Live Video Search init-resources subchart
-version: 2026.2.0-helm
+version: 2026.3.0-rc1-helm
 appVersion: "1.0.0"
