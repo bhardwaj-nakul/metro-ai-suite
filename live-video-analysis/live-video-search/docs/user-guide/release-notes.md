@@ -1,8 +1,8 @@
 # Release Notes: Live Video Search
 
-## Version 2026.3.0-rc1
+## Version 2026.3.0-rc2
 
-**Release Date**: November 6, 2026
+**Release Date**: November 21, 2026
 
 **New**:
 
@@ -13,7 +13,7 @@
 
 **Improved**:
 
-- Aligned LVS with the Video Search and Summarization 2026.3.0-rc1 stack (Multimodal DataPrep, Vector Retriever, and Multimodal Embedding Serving), including the updated GPU drivers in the DataPrep and Multimodal Embedding Serving images.
+- Aligned LVS with the Video Search and Summarization 2026.3.0-rc2 stack (Multimodal DataPrep, Vector Retriever, and Multimodal Embedding Serving), including the updated GPU drivers in the DataPrep and Multimodal Embedding Serving images.
 - `setup.sh`, `make validate-env`, and the Helm chart now fail early with a clear message when object detection is enabled and no detection model is set.
 - Updated the documentation links to the new Metro AI Suite repository.
 

@@ -1,8 +1,8 @@
 global:
   registry: "intel"
-  tag: "2026.3.0-rc1"
+  tag: "2026.3.0-rc2"
   vssStackTag: ""
-  smartNvrStackTag: "2026.3.0-rc1"
+  smartNvrStackTag: "2026.3.0-rc2"
   pullPolicy: ""
   vectordbBackend: "vdms" # vdms | milvus
 
@@ -473,7 +473,7 @@ metrics-manager:
   coLocateWithDataPrep: true
   image:
     repository: intel/metrics-manager
-    tag: "2026.3.0-rc1"
+    tag: "2026.3.0-rc2"
     pullPolicy: IfNotPresent
 
 vdms-vector-db:

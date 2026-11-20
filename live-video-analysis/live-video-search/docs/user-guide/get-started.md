@@ -37,10 +37,10 @@ Before running the application, you need to set several environment variables:
 
     ```bash
     export REGISTRY_URL=intel
-    export TAG=2026.3.0-rc1
+    export TAG=2026.3.0-rc2
     ```
 
-    The release defaults pin the VSS Search images and the Smart NVR Event Router to `2026.3.0-rc1`.
+    The release defaults pin the VSS Search images and the Smart NVR Event Router to `2026.3.0-rc2`.
 
     **Override tags per stack (recommended for mixed release cycles):**
 
@@ -51,9 +51,9 @@ Before running the application, you need to set several environment variables:
     Use stack-specific tag overrides when you need different image versions for each stack:
 
      ```bash
-     export TAG=2026.3.0-rc1
-     export VSS_STACK_TAG=2026.3.0-rc1
-     export SMART_NVR_STACK_TAG=2026.3.0-rc1
+     export TAG=2026.3.0-rc2
+     export VSS_STACK_TAG=2026.3.0-rc2
+     export SMART_NVR_STACK_TAG=2026.3.0-rc2
      ```
 
     Set these overrides when building or selecting other stack versions.
