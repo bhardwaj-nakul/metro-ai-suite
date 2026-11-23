@@ -44,7 +44,7 @@ cd metro-ai-suite-vsqa-chart
 Clone the source repository
 
 ```bash
-git clone https://github.com/open-edge-platform/metro-ai-suite.git -b main
+git clone https://github.com/open-edge-platform/metro-ai-suite.git -b release-2026.3.0
 ```
 
 Navigate to the chart directory

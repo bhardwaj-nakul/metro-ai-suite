@@ -28,7 +28,7 @@ gated or private model, obtain the necessary model access and set an authorized 
 
   ```bash
   export REGISTRY="intel"
-  export TAG="2026.3.0-rc1"
+  export TAG="2026.3.0-rc2"
   ```
 
 ## Quick Start with Setup Script

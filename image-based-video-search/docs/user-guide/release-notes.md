@@ -13,20 +13,22 @@ application.
 
 ## Version 1.5.0
 
+**Release Date**: December 7, 2026
+
 **New**:
 
-- Added a QR code in app UI that links to the documentation.
-- This app is planned for removal in the 2027.0 release.
+- Added a QR code in the application UI that links to the documentation.
+- Announced that this application is planned for removal in the 2027.0 release.
 
 **Removed**:
 
-- Removed helm deployment.
+- Removed the Helm deployment.
 
 **Improved**:
 
-- Consumed the latest DL Streamer version 2026.3.0.
-- Python libraries and npm package updates.
-- Optimized image based video search and streaming pipeline docker image sizes
+- Updated to DL Streamer version 2026.3.0.
+- Updated Python libraries and npm packages.
+- Optimized the Docker image sizes of the image-based video search and streaming pipelines.
 
 ## Version 1.4.0
 

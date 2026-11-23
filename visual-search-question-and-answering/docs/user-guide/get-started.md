@@ -27,7 +27,7 @@ cd metro-ai-suite
 Run the commands to build images for the microservices:
 
 ```bash
-git clone https://github.com/open-edge-platform/edge-ai-libraries.git -b main
+git clone https://github.com/open-edge-platform/edge-ai-libraries.git -b release-2026.3.0
 cd edge-ai-libraries/microservices
 
 cd visual-data-preparation-for-retrieval/multimodal-dataprep

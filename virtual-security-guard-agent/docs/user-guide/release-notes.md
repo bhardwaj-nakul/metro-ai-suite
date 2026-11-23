@@ -13,7 +13,9 @@ SPDX-License-Identifier: Apache-2.0
 
 # Release Notes: Virtual Security Guard Agent
 
-## Version 2026.3.0-rc1
+## Version 2026.3.0
+
+**Release Date**: December 7, 2026
 
 The Virtual Security Guard (VSG) Agent sample application provides an operator console
 for Argus, the agent that searches recorded and live camera footage through Intel's
@@ -23,8 +25,8 @@ Video Search and Summarization (VSS) sample application.
 
 - Chat-driven investigations with text and image search through the VSS server using the
   Model Context Protocol (MCP).
-- Human-in-the-loop review grid: top six matches, up to 20 per search, confirm-only;
-  the latest grid stays editable.
+- Human-in-the-loop review grid that shows the top six matches (up to 20 per search) for
+  confirmation only. The latest grid stays editable.
 - Clip player with **Pause & crop person** and automatic follow-up image search.
 - Time-ordered route of confirmed sightings on an uploadable floorplan. The floorplan’s
   camera keys are the VSS tags.
@@ -38,5 +40,5 @@ Video Search and Summarization (VSS) sample application.
 
 **Known Issues**:
 
-- No user authentication; deploy on a trusted network.
+- The application has no user authentication. Deploy it on a trusted network.
 - See [Known Issues](./known-issues.md).

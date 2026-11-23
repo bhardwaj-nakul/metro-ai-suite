@@ -34,18 +34,17 @@ RUN pnpm install --frozen-lockfile --ignore-scripts && \
     /opt/build-venv/bin/python -m build --wheel --outdir /dist && \
     python3 -c 'import glob, zipfile; wheels = glob.glob("/dist/gradio-*.whl"); assert len(wheels) == 1; assert "gradio/templates/frontend/index.html" in zipfile.ZipFile(wheels[0]).namelist()'
 
-FROM python:3.13-slim AS builder
+FROM python:3.13-slim-trixie AS python-base
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies and apply available security patches
-# (e.g. CVE-2026-53615 affecting util-linux/login packages)
-RUN apt-get update && \
+RUN apt-get --error-on=any update && \
     apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get satisfy -y --no-install-recommends --no-remove ca-certificates \
+        'apt (>= 3.0.4)' 'zlib1g (>= 1:1.3.dfsg+really1.3.1-1+deb13u1)' && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM python-base AS builder
 
 # Install uv package manager
 RUN pip install --no-cache-dir "uv>=0.9.22,<1.0.0"
@@ -94,14 +93,7 @@ RUN mkdir -p /copyleft_sources && \
         apt-get remove --purge -y gcc build-essential libffi-dev python3-dev; \
     fi
 
-FROM python:3.13-slim AS runtime
-
-WORKDIR /app
-
-RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get install -y --no-install-recommends ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+FROM python-base AS runtime
 
 COPY --from=builder /app /app
 COPY --from=builder /licenses /licenses

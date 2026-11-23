@@ -2,10 +2,9 @@
 
 ## Version 2026.3.0
 
-**Helm Chart Version**: 1.1.0
-**Release Date**: October 9, 2026
+**Release Date**: December 7, 2026
 
-**Changes**:
+**Improved**:
 
 - Data Preparation:
 
@@ -20,23 +19,24 @@
     `MM_DATAPREP_ENABLE_OBJECT_DETECTION` and `DATA_INGEST_WITH_DETECT` to
     enable it.
   - Object detection now uses Hugging Face OpenVINO models. Set
-    `DATAPREP_DETECTION_MODEL` (Helm `MM_DATAPREP_DETECTION_MODEL_NAME`) to an
+    `DATAPREP_DETECTION_MODEL` (Helm: `MM_DATAPREP_DETECTION_MODEL_NAME`) to an
     `OpenVINO/<repo>` object-detection model such as `OpenVINO/yolox_s-int8-ov`.
-    It has no default and is required whenever object detection is enabled. The
-    optional `DATAPREP_DETECTION_CLASSES` keeps only the listed classes.
-    Downloaded models are cached in the `dataprep-detection-models` volume; the
-    former `dataprep-yolox-models` volume is no longer used and can be removed.
-  - Added `DATAPREP_PIPELINE_STALL_TIMEOUT_S` (default 300s), which fails an
-    ingest job whose pipeline stops making progress instead of leaving it
-    running indefinitely. Set it to 0 to disable the watchdog.
+    The variable has no default and is required whenever object detection is
+    enabled. The optional `DATAPREP_DETECTION_CLASSES` keeps only the listed
+    classes. Downloaded models are cached in the `dataprep-detection-models`
+    volume; the former `dataprep-yolox-models` volume is no longer used and can
+    be removed.
+  - Added `DATAPREP_PIPELINE_STALL_TIMEOUT_S` (default: 300 seconds), which fails
+    an ingest job whose pipeline stops making progress instead of leaving it
+    running indefinitely. Set it to `0` to disable the watchdog.
 
-- Helm Chart:
+- Helm chart (version 1.1.0):
 
   - The chart is no longer tied to a namespace named `vsqa`. In-cluster service
     addresses are derived from the release namespace, so it can be installed
     into any namespace.
-  - Added `resources` on the VLM, embedding, and data preparation services to
-    request Intel device plugin resources when running on GPU or NPU.
+  - Added `resources` settings for the VLM, embedding, and data preparation
+    services to request Intel device plugin resources when running on GPU or NPU.
   - The render device group is now applied to the pods, so a non-root container
     user can open `/dev/dri/renderD*`.
   - Added `global.nodeSelector` to pin the pods to the node that holds the
@@ -47,32 +47,34 @@
   - Inference devices are now selected per microservice in Docker Compose
     instead of being derived from `EMBEDDING_DEVICE`. Setting a GPU for query
     embedding no longer moves the ingest pipeline onto the same device, where
-    two copies of a large embedding model could exhaust it and make queries
-    fail with `CL_OUT_OF_RESOURCES`.
-  - The dataprep devices are now set with `DATAPREP_EMBEDDING_DEVICE` and
+    two copies of a large embedding model could exhaust the device memory and
+    cause queries to fail with `CL_OUT_OF_RESOURCES`.
+  - The DataPrep devices are now set with `DATAPREP_EMBEDDING_DEVICE` and
     `DATAPREP_DETECTION_DEVICE`, matching the other `DATAPREP_*` settings. The
-    previous `MM_DATAPREP_*` names are still honoured.
+    previous `MM_DATAPREP_*` names are still honored.
   - Device defaults are now `CPU` for query embedding and `GPU` for the VLM and
     the ingest pipeline. The previous `GPU.1` default did not exist on
     platforms with a single GPU.
 
 - Documentation:
 
-  - Documented device selection, device plugin resources, device group ids,
+  - Documented device selection, device plugin resources, device group IDs,
     node pinning, and the corresponding troubleshooting steps for Helm.
   - Documented the per-service device variables, their defaults, and the
     single-GPU contention caveat for Docker Compose.
-  - Documented `HOST_DATA_PATH`, `HF_ENDPOINT` and
+  - Documented `HOST_DATA_PATH`, `HF_ENDPOINT`, and
     `VLM_COMPRESSION_WEIGHT_FORMAT` in the Compose guide. `HF_ENDPOINT`
-    defaults to a mirror intended for mainland China and has to be overridden
+    defaults to a mirror intended for mainland China and must be overridden
     to download models from Hugging Face directly.
-  - VLM OpenVINO Serving is now consumed as a published image instead of being
-    built from source.
+  - VLM OpenVINO Serving now uses a published image instead of being built
+    from source.
 
-**Hardware Used for Validation**:
+**Upgrade Notes**:
 
-- Intel® Core™ processors (13th Gen, i7 recommended)
-- Intel® Arc™ A-Series Graphics (Intel® Arc™ A770 recommended)
+- Hardware Used for Validation:
+
+  - Intel® Core™ processors (13th Gen, i7 recommended)
+  - Intel® Arc™ A-Series Graphics (Intel® Arc™ A770 recommended)
 
 ## Version 2025.2.0
 

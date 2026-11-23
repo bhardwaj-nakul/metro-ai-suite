@@ -2,22 +2,22 @@
 
 ## Version 1.21.0
 
+**Release Date**: December 7, 2026
+
 **New**:
 
-- Added support for Ubuntu 26.04 LTS
+- Added support for Ubuntu 26.04 LTS.
 - Added a QR code to the Grafana dashboard that links to the documentation.
-- Added useful hardware telemetry details in the system performance dashboard panel in Grafana.
-
-**Removed**:
-
-- Removed helm deployment.
+- Added hardware telemetry details to the system performance panel of the Grafana dashboard.
 
 **Improved**:
 
-- Improved the security context by adding authentication to Node-RED container.
-- Stability and robustness improvements in the script that calculates stream density.
-- Consumed the latest DL Streamer Pipeline Server version 2026.3.0.
-- Consumed the latest Scenescape version 2026.3.0.
+- Removed Helm deployment.
+
+- Improved the security context by adding authentication to the Node-RED container.
+- Improved the stability and robustness of the script that calculates stream density.
+- Updated DL Streamer Pipeline Server to version 2026.3.0.
+- Updated Scenescape to version 2026.3.0.
 
 ## Version 1.20.0
 

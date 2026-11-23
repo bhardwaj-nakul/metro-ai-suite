@@ -80,7 +80,7 @@ Clone the repository containing the Helm chart:
 
 ```bash
 # Clone the mainline branch
-git clone https://github.com/open-edge-platform/metro-ai-suite.git -b main
+git clone https://github.com/open-edge-platform/metro-ai-suite.git -b release-2026.3.0
 ```
 
 #### Step 2: Change to the Chart Directory

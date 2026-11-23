@@ -2,22 +2,22 @@
 
 ## Version 1.7.0
 
+**Release Date**: December 7, 2026
+
 **New**:
 
-- Added support for Ubuntu 26.04 LTS
-- Added a new application flow with Scenescape based object tracking.
+- Added support for Ubuntu 26.04 LTS.
+- Added a new application flow with Scenescape-based object tracking.
 - Added a QR code to the Grafana dashboard that links to the documentation.
-
-**Removed**:
-
-- Removed helm deployment.
 
 **Improved**:
 
-- More useful hardware telemetry details shown in the system performance dashboard panel in Grafana.
-- Improved the security context by adding authentication to Node-RED container.
-- Stability and robustness improvements in the script that calculates stream density.
-- Consumed the latest DL Streamer version 2026.3.0.
+- Removed Helm deployment.
+
+- Improved the hardware telemetry details shown in the system performance panel of the Grafana dashboard.
+- Improved the security context by adding authentication to the Node-RED container.
+- Improved the stability and robustness of the script that calculates stream density.
+- Updated DL Streamer to version 2026.3.0.
 
 ## Version 1.6.0
 

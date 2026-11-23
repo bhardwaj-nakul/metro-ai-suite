@@ -63,7 +63,7 @@ An AI analytics web dashboard shows simulated building activity, alerts, camera 
 Clone the repository (Git LFS extension is required for scene bundles):
 
 ```bash
-git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/metro-ai-suite.git
+git clone --filter=blob:none --sparse --branch release-2026.3.0 https://github.com/open-edge-platform/metro-ai-suite.git
 cd metro-ai-suite
 git sparse-checkout set smart-building-digital-twin
 cd smart-building-digital-twin

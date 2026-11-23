@@ -72,7 +72,7 @@ cd smart-nvr
 Clone the repository containing the Helm chart:
 
 ```bash
-git clone https://github.com/open-edge-platform/metro-ai-suite.git -b main
+git clone https://github.com/open-edge-platform/metro-ai-suite.git --branch release-2026.3.0
 ```
 
 ##### Step 2: Change to the Chart Directory

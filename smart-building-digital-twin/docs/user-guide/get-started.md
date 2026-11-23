@@ -16,7 +16,7 @@
 Clone the repository:
 
 ```bash
-git clone --filter=blob:none --sparse --branch main https://github.com/open-edge-platform/metro-ai-suite.git
+git clone --filter=blob:none --sparse --branch release-2026.3.0 https://github.com/open-edge-platform/metro-ai-suite.git
 cd metro-ai-suite
 git sparse-checkout set smart-building-digital-twin
 cd smart-building-digital-twin

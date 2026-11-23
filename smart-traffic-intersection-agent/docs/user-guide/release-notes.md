@@ -2,14 +2,18 @@
 
 ## Version 2026.3.0
 
-**Release Date**: TBD
-
-> [!NOTE]
-> Helm Chart support will be deprecated in the next release. Limited validation has been performed on the Helm charts for this release.
+**Release Date**: December 7, 2026
 
 **Improved**:
 
 - Updated OpenVINO Model Server (OVMS) CPU and GPU images to version 2026.4.0 for Docker Compose deployments.
+- Updated container image system packages to address high-severity vulnerabilities in zlib and APT.
+
+**Upgrade Notes**:
+
+- **Helm chart support will be deprecated in the next release.**
+
+  Limited validation has been performed on the Helm charts for this release.
 
 ## Version 2026.2.0
 

@@ -34,6 +34,11 @@ FROM python:3.12-slim AS production
 ARG USER_ID=1000
 ARG USER_GROUP_ID=1000
 
+# Pick up Debian security fixes published after the base image was built, and patch the base image's pip
+RUN apt-get update && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir --upgrade pip
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

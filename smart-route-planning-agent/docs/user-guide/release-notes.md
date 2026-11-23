@@ -1,8 +1,8 @@
 # Release Notes: Smart Route Planning Agent
 
-## Version 2026.3.0-rc1
+## Version 2026.3.0
 
-**Release Date**: November, 2026
+**Release Date**: December 7, 2026
 
 **New**:
 
@@ -18,12 +18,9 @@
 - Updated the Docker Compose OVMS image to `2026.4.0` and increased the default reasoning timeout to 120 seconds to accommodate CPU inference with the documented Qwen models.
 - Updated documentation links and sparse-checkout instructions for the Metro AI Suite repository.
 
-**Deprecated**:
-
-- Helm chart deployment is deprecated starting with this release. Use Docker Compose for new deployments and plan to migrate existing Helm deployments to Docker Compose.
-
 **Upgrade Notes**:
 
+- Helm chart deployment is deprecated starting with this release. Use Docker Compose for new deployments and plan to migrate existing Helm deployments to Docker Compose.
 - Python 3.10 is no longer supported. Use Python 3.11 or later for source environments; the application container continues to use Python 3.12.
 - Update `api_hosts` entries in `src/data/config.json` to use `host:port` without the `ws://` prefix.
 - To enable reasoning-based planning in Docker Compose, set `REASONING_MODEL_NAME`.
