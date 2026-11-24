@@ -52,7 +52,7 @@ This script sets these important values:
 | -------- | ------- | ------ |
 | `HOST_IP` | *(auto-detected)* | Host address advertised to browsers on other machines for WebRTC media. Not needed when the browser runs on the same host. |
 | `REGISTRY` | `intel/` | Image registry prefix. |
-| `TAG` | `2026.3.0-rc1` | Docker image tag. |
+| `TAG` | `2026.3.0-rc2` | Docker image tag. |
 | `DASHBOARD_PORT` | `4173` | Port for the web dashboard. |
 | `EVAM_HOST_PORT` | `8040` | Port for the pipeline management REST API. |
 | `WHIP_SERVER_PORT` | `8889` | Port for WebRTC/WHIP signaling (mediamtx). |

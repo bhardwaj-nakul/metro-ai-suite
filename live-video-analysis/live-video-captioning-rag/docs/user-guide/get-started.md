@@ -58,7 +58,7 @@ This script sets the following important values:
 | --- | --- | --- |
 | `HOST_IP` | `(auto-detected)` | Host address advertised to browsers on other machines for WebRTC media. Not needed when the browser runs on the same host. |
 | `REGISTRY` | `intel/` | Image registry prefix. |
-| `TAG` | `2026.3.0-rc1` | Docker image tag. |
+| `TAG` | `2026.3.0-rc2` | Docker image tag. |
 | `LVC_DASHBOARD_PORT` | `4173` | Port for the LVC web dashboard. |
 | `LVC_RAG_DASHBOARD_PORT` | `4172` | Port for the LVC-RAG web dashboard. |
 | `EVAM_HOST_PORT` | `8040` | Port for the pipeline management REST API. |

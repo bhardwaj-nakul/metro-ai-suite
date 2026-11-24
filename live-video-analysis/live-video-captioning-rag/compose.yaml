@@ -5,7 +5,7 @@ name: ${PROJECT_NAME:-live-video-caption-rag}
 
 services:
   live-video-captioning-rag:
-    image: ${REGISTRY:-}live-video-captioning-rag:${TAG:-latest}
+    image: ${REGISTRY:-}live-video-captioning-rag:${TAG:-2026.3.0-rc2}
     build:
       context: ./app
       args:
@@ -68,7 +68,7 @@ services:
       - rag_network
 
   multimodal-embedding-serving:
-    image: ${REGISTRY:-}multimodal-embedding-serving:${TAG:-latest}
+    image: intel/multimodal-embedding-serving:2026.3.0-rc2
     container_name: multimodal-embedding-serving
     ports:
       - '${EMBEDDING_SERVER_PORT:-9777}:8000'
@@ -150,7 +150,7 @@ services:
       - rag_network
 
   dlstreamer-pipeline-server:
-    image: intel/dlstreamer-pipeline-server:2026.3.0-ubuntu24-rc1
+    image: intel/dlstreamer-pipeline-server:2026.3.0-ubuntu24-rc2
     hostname: dlstreamer-pipeline-server
     container_name: dlstreamer-pipeline-server
     read_only: false
@@ -284,7 +284,7 @@ services:
       - rag_network
 
   video-caption-service:
-    image: ${REGISTRY:-}video-caption-service:${TAG:-latest}
+    image: ${REGISTRY:-}video-caption-service:${TAG:-2026.3.0-rc2}
     build:
       context: ../live-video-captioning/app
       args:
@@ -351,7 +351,7 @@ services:
       - rag_network
 
   metrics-manager:
-    image: intel/metrics-manager:2026.3.0-extended-rc1
+    image: intel/metrics-manager:2026.3.0-extended-rc2
     container_name: metrics-manager
     environment:
       - no_proxy=localhost,127.0.0.1,video-caption-service,metrics-manager,${no_proxy}

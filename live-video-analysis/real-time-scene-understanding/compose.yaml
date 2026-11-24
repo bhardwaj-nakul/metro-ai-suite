@@ -47,7 +47,7 @@ services:
       - app_network
 
   metrics-manager:
-    image: intel/metrics-manager:2026.3.0-extended-rc1
+    image: intel/metrics-manager:2026.3.0-extended-rc2
     container_name: metrics-manager
     environment:
       - no_proxy=localhost,127.0.0.1,real-time-scene-understanding,metrics-manager,${no_proxy:-}
@@ -110,7 +110,7 @@ services:
       start_period: 30s
 
   real-time-scene-understanding:
-    image: ${REGISTRY:-}real-time-scene-understanding:${TAG:-latest}
+    image: ${REGISTRY:-}real-time-scene-understanding:${TAG:-2026.3.0-rc2}
     build:
       context: ./app
       dockerfile: Dockerfile
