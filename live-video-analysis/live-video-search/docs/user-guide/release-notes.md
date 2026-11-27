@@ -4,6 +4,8 @@
 
 **Release Date**: December 7, 2026
 
+> **Note:** Helm Chart support will be deprecated in the next release. Limited validation has been performed on the Helm charts for this release.
+
 **New**:
 
 - Added the `--pull-always` option to `setup.sh` (`PULL_ALWAYS=true` for `make deploy`) to refresh cached images from the registry before starting the stack.
