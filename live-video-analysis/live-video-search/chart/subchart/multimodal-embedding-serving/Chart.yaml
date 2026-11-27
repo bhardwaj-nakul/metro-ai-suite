@@ -1,5 +1,0 @@
-apiVersion: v2
-name: multimodal-embedding-serving
-description: Live Video Search multimodal-embedding-serving subchart
-version: 2026.3.0-rc2-helm
-appVersion: "1.0.0"

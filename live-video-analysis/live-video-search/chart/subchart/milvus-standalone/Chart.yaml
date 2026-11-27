@@ -1,8 +1,0 @@
-# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
-# SPDX-License-Identifier: Apache-2.0
-apiVersion: v2
-name: milvus-standalone
-description: Standalone Milvus backend for Live Video Search
-type: application
-version: 2026.3.0-rc2-helm
-appVersion: "2.6.14"

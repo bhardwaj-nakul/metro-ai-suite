@@ -380,7 +380,6 @@ The accuracy of search results vary based on multiple factors as listed in the [
 
 get-started/system-requirements.md
 get-started/build-from-source.md
-get-started/deploy-with-helm.md
 
 :::
 hide_directive-->

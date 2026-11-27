@@ -1,5 +1,0 @@
-apiVersion: v2
-name: video-search
-description: Live Video Search video-search subchart
-version: 2026.3.0-rc2-helm
-appVersion: "1.0.0"

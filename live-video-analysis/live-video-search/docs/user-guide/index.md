@@ -58,7 +58,6 @@ Live Video Search combines two existing stacks:
 
 - **Deployment**
   - [Build from Source](./get-started/build-from-source.md): Build the required images.
-  - [Deploy with Helm](./get-started/deploy-with-helm.md): Deploy LVS on Kubernetes using Helm profiles.
 
 - **Usage & API**
   - [API Reference](./api-reference.md): Key endpoints and references.

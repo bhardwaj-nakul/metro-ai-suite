@@ -1,5 +1,0 @@
-apiVersion: v2
-name: rtsp-test
-description: Live Video Search rtsp-test subchart
-version: 2026.3.0-rc2-helm
-appVersion: "1.0.0"

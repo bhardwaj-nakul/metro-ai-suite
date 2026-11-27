@@ -267,7 +267,7 @@ export VS_BATCH_JOB_POLL_INTERVAL_SECONDS=${VS_BATCH_JOB_POLL_INTERVAL_SECONDS:-
 export VS_BATCH_JOB_TIMEOUT_SECONDS=${VS_BATCH_JOB_TIMEOUT_SECONDS:-3600}
 
 # Per-component device selection (CPU default | GPU | NPU). Each component is
-# independent — parity with the Helm charts. No "baseline" device.
+# independent; there is no "baseline" device.
 #   DATAPREP_EMBEDDING_DEVICE → in-process embedding in multimodal-dataprep
 #   DATAPREP_DETECTION_DEVICE → object detection in multimodal-dataprep
 #   MME_EMBEDDING_DEVICE      → query embedding used by vector-retriever

@@ -1,5 +1,0 @@
-apiVersion: v2
-name: vdms-vector-db
-description: Live Video Search vdms-vector-db subchart
-version: 2026.3.0-rc2-helm
-appVersion: "1.0.0"

@@ -1,5 +1,0 @@
-apiVersion: v2
-name: vss-ui
-description: Live Video Search vss-ui subchart
-version: 2026.3.0-rc2-helm
-appVersion: "1.0.0"
